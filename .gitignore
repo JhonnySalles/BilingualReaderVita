@@ -1,0 +1,8 @@
+build/
+*.vpk
+*.velf
+*.elf
+*.o
+.vscode/
+.idea/
+.DS_Store
