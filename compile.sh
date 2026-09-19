@@ -10,16 +10,9 @@ echo "  BilingualReaderVita - Build Bash (MSYS2 / Linux)"
 echo "======================================================="
 echo ""
 
-# Garantir variavel VITASDK se nao estiver definida
-if [ -z "$VITASDK" ]; then
-    if [ -d "/usr/local/vitasdk" ]; then
-        export VITASDK="/usr/local/vitasdk"
-        export PATH="$VITASDK/bin:$PATH"
-        echo "[*] VITASDK definido para: $VITASDK"
-    else
-        echo "[!] AVISO: Variavel VITASDK nao encontrada. O CMake tentara carregar as configuracoes padrao."
-    fi
-fi
+export VITASDK="/usr/local/vitasdk"
+export PATH="$VITASDK/bin:$PATH"
+echo "[*] VITASDK definido para: $VITASDK"
 
 # Criar pastas necessarias
 mkdir -p "$SCRIPT_DIR/build"
@@ -29,7 +22,7 @@ mkdir -p "$SCRIPT_DIR/apk"
 cd "$SCRIPT_DIR/build"
 
 echo "[*] Executando CMake..."
-cmake ..
+cmake -DCMAKE_TOOLCHAIN_FILE="$VITASDK/share/vita.toolchain.cmake" -G "Unix Makefiles" ..
 
 echo "[*] Compilando projeto..."
 make -j"$(nproc 2>/dev/null || echo 4)"

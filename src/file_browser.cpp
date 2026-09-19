@@ -1,7 +1,13 @@
 #include "file_browser.h"
+#include "cache_manager.h"
+#include "file_utils.h"
+
+#ifdef __vita__
 #include <psp2/io/dirent.h>
 #include <psp2/io/stat.h>
 #include <psp2/kernel/processmgr.h>
+#endif
+
 #include <algorithm>
 #include <cstdio>
 #include <sstream>
@@ -9,12 +15,8 @@
 #include <fstream>
 #include <ctime>
 
-const std::string FileBrowser::BASE_DIRECTORY = "ux0:data/BilingualReaderVita/";
-const std::string FileBrowser::META_FILE = "ux0:data/BilingualReaderVita/library_meta.dat";
-
 void FileBrowser::ensureDirectoryExists() {
-    sceIoMkdir("ux0:data", 0777);
-    sceIoMkdir(BASE_DIRECTORY.c_str(), 0777);
+    CacheManager::getInstance().init();
 }
 
 std::string FileBrowser::formatFileSize(size_t bytes) {
@@ -29,20 +31,35 @@ std::string FileBrowser::formatFileSize(size_t bytes) {
     return ss.str();
 }
 
-static FileType getFileType(const std::string& name) {
-    if (name.length() < 4) return FileType::UNKNOWN;
-    
-    size_t dotPos = name.find_last_of(".");
-    if (dotPos == std::string::npos) return FileType::UNKNOWN;
-    
-    std::string ext = name.substr(dotPos + 1);
-    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-
+FileType FileBrowser::getFileType(const std::string& name) {
+    std::string ext = FileUtils::getExtension(name);
     if (ext == "txt") return FileType::TXT;
     if (ext == "cbz") return FileType::CBZ;
+    if (ext == "zip") return FileType::ZIP;
+    if (ext == "cbr") return FileType::CBR;
+    if (ext == "rar") return FileType::RAR;
+    if (ext == "cbt") return FileType::CBT;
+    if (ext == "tar") return FileType::TAR;
+    if (ext == "cb7") return FileType::CB7;
+    if (ext == "7z") return FileType::SEVEN_ZIP;
     if (ext == "epub") return FileType::EPUB;
-    
     return FileType::UNKNOWN;
+}
+
+bool FileBrowser::isMangaType(FileType type) {
+    switch (type) {
+        case FileType::CBZ:
+        case FileType::ZIP:
+        case FileType::CBR:
+        case FileType::RAR:
+        case FileType::CBT:
+        case FileType::TAR:
+        case FileType::CB7:
+        case FileType::SEVEN_ZIP:
+            return true;
+        default:
+            return false;
+    }
 }
 
 const char* FileBrowser::getSortModeName(SortMode mode) {
@@ -55,8 +72,12 @@ const char* FileBrowser::getSortModeName(SortMode mode) {
     }
 }
 
+static std::string getMetaFilePath() {
+    return CacheManager::getInstance().getCacheBasePath() + "/library_meta.dat";
+}
+
 void FileBrowser::loadMetadata(std::vector<LibraryItem>& items) {
-    std::ifstream in(META_FILE);
+    std::ifstream in(getMetaFilePath());
     if (!in.is_open()) return;
 
     std::string filename;
@@ -76,7 +97,7 @@ void FileBrowser::loadMetadata(std::vector<LibraryItem>& items) {
 }
 
 void FileBrowser::saveMetadata(const std::vector<LibraryItem>& items) {
-    std::ofstream out(META_FILE);
+    std::ofstream out(getMetaFilePath());
     if (!out.is_open()) return;
 
     for (const auto& item : items) {
@@ -93,15 +114,18 @@ void FileBrowser::toggleFavorite(LibraryItem& item) {
     item.isFavorite = !item.isFavorite;
 }
 
+bool FileBrowser::deleteItem(const LibraryItem& item) {
+    if (std::remove(item.fullPath.c_str()) != 0) {
+        return false;
+    }
+    return true;
+}
+
 void FileBrowser::sortItems(std::vector<LibraryItem>& items, SortMode mode) {
     switch (mode) {
         case SortMode::NAME:
             std::sort(items.begin(), items.end(), [](const LibraryItem& a, const LibraryItem& b) {
-                std::string na = a.filename;
-                std::string nb = b.filename;
-                std::transform(na.begin(), na.end(), na.begin(), ::tolower);
-                std::transform(nb.begin(), nb.end(), nb.begin(), ::tolower);
-                return na < nb;
+                return FileUtils::naturalSortCompare(a.filename, b.filename);
             });
             break;
         case SortMode::LAST_READ:
@@ -114,7 +138,7 @@ void FileBrowser::sortItems(std::vector<LibraryItem>& items, SortMode mode) {
                 if (a.isFavorite != b.isFavorite) {
                     return a.isFavorite > b.isFavorite;
                 }
-                return a.filename < b.filename;
+                return FileUtils::naturalSortCompare(a.filename, b.filename);
             });
             break;
         case SortMode::TYPE:
@@ -122,7 +146,7 @@ void FileBrowser::sortItems(std::vector<LibraryItem>& items, SortMode mode) {
                 if (a.typeString != b.typeString) {
                     return a.typeString < b.typeString;
                 }
-                return a.filename < b.filename;
+                return FileUtils::naturalSortCompare(a.filename, b.filename);
             });
             break;
         default:
@@ -152,7 +176,10 @@ std::vector<LibraryItem> FileBrowser::scanLibrary() {
     std::vector<LibraryItem> items;
     ensureDirectoryExists();
 
-    SceUID dfd = sceIoDopen(BASE_DIRECTORY.c_str());
+    std::string libDir = CacheManager::getInstance().getLibraryPath();
+
+#ifdef __vita__
+    SceUID dfd = sceIoDopen(libDir.c_str());
     if (dfd < 0) {
         return items;
     }
@@ -169,7 +196,7 @@ std::vector<LibraryItem> FileBrowser::scanLibrary() {
         if (type != FileType::UNKNOWN) {
             LibraryItem item;
             item.filename = filename;
-            item.fullPath = BASE_DIRECTORY + filename;
+            item.fullPath = libDir + "/" + filename;
             item.type = type;
             item.fileSize = dir.d_stat.st_size;
             item.formattedSize = formatFileSize(item.fileSize);
@@ -179,6 +206,13 @@ std::vector<LibraryItem> FileBrowser::scanLibrary() {
             switch (type) {
                 case FileType::TXT: item.typeString = "TXT"; break;
                 case FileType::CBZ: item.typeString = "CBZ"; break;
+                case FileType::ZIP: item.typeString = "ZIP"; break;
+                case FileType::CBR: item.typeString = "CBR"; break;
+                case FileType::RAR: item.typeString = "RAR"; break;
+                case FileType::CBT: item.typeString = "CBT"; break;
+                case FileType::TAR: item.typeString = "TAR"; break;
+                case FileType::CB7: item.typeString = "CB7"; break;
+                case FileType::SEVEN_ZIP: item.typeString = "7Z"; break;
                 case FileType::EPUB: item.typeString = "EPUB"; break;
                 default: item.typeString = "???"; break;
             }
@@ -188,6 +222,7 @@ std::vector<LibraryItem> FileBrowser::scanLibrary() {
     }
 
     sceIoDclose(dfd);
+#endif
 
     loadMetadata(items);
     sortItems(items, SortMode::NAME);

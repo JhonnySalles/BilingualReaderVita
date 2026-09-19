@@ -6,6 +6,13 @@
 enum class FileType {
     TXT,
     CBZ,
+    CBR,
+    CBT,
+    CB7,
+    ZIP,
+    RAR,
+    TAR,
+    SEVEN_ZIP,
     EPUB,
     UNKNOWN
 };
@@ -31,9 +38,6 @@ struct LibraryItem {
 
 class FileBrowser {
 public:
-    static const std::string BASE_DIRECTORY;
-    static const std::string META_FILE;
-
     static void ensureDirectoryExists();
     static std::vector<LibraryItem> scanLibrary();
     static std::string formatFileSize(size_t bytes);
@@ -46,4 +50,8 @@ public:
     static void saveMetadata(const std::vector<LibraryItem>& items);
     static void markAsRead(LibraryItem& item);
     static void toggleFavorite(LibraryItem& item);
+    static bool deleteItem(const LibraryItem& item);
+
+    static FileType getFileType(const std::string& filename);
+    static bool isMangaType(FileType type);
 };

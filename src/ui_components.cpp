@@ -7,10 +7,12 @@ vita2d_texture* UIComponents::appIcon = nullptr;
 void UIComponents::init(vita2d_pgf* defaultPgf) {
     pgf = defaultPgf;
     if (!appIcon) {
-        appIcon = vita2d_load_PNG_file("app0:assets/images/app_icon.png");
-        if (!appIcon) appIcon = vita2d_load_PNG_file("app0:app_icon.png");
+        appIcon = vita2d_load_PNG_file("app0:assets/images/app_icon_small.png");
+        if (!appIcon) appIcon = vita2d_load_PNG_file("app0:app_icon_small.png");
+        if (!appIcon) appIcon = vita2d_load_PNG_file("assets/images/app_icon_small.png");
+        if (!appIcon) appIcon = vita2d_load_PNG_file("app_icon_small.png");
+        if (!appIcon) appIcon = vita2d_load_PNG_file("app0:assets/images/app_icon.png");
         if (!appIcon) appIcon = vita2d_load_PNG_file("assets/images/app_icon.png");
-        if (!appIcon) appIcon = vita2d_load_PNG_file("app_icon.png");
     }
 }
 
@@ -33,23 +35,31 @@ void UIComponents::drawRoundedBox(float x, float y, float w, float h, float radi
 }
 
 void UIComponents::drawStar(float x, float y, float size, unsigned int color) {
-    // Desenha uma estrela estilizada usando círculos/formas geométricas
     vita2d_draw_fill_circle(x + size / 2.0f, y + size / 2.0f, size / 2.2f, color);
 }
 
-void UIComponents::drawBadge(float x, float y, const std::string& type, float scale) {
+void UIComponents::drawBadge(float x, float y, const std::string& type, float scale, float alpha) {
+    if (alpha <= 0.01f) return;
     unsigned int badgeColor = UITheme::BadgeTXT;
     if (type == "CBZ") badgeColor = UITheme::BadgeCBZ;
+    else if (type == "ZIP") badgeColor = UITheme::BadgeZIP;
+    else if (type == "CBR") badgeColor = UITheme::BadgeCBR;
+    else if (type == "RAR") badgeColor = UITheme::BadgeRAR;
+    else if (type == "CBT") badgeColor = UITheme::BadgeCBT;
+    else if (type == "TAR") badgeColor = UITheme::BadgeTAR;
+    else if (type == "CB7") badgeColor = UITheme::BadgeCB7;
+    else if (type == "7Z") badgeColor = UITheme::Badge7Z;
     else if (type == "EPUB") badgeColor = UITheme::BadgeEPUB;
 
     float w = 54.0f * scale;
     float h = 22.0f * scale;
-    drawRoundedBox(x, y, w, h, 5.0f * scale, badgeColor);
+    drawRoundedBox(x, y, w, h, 5.0f * scale, applyAlpha(badgeColor, alpha));
 
     if (pgf) {
-        vita2d_pgf_draw_text(pgf, x + 8.0f * scale, y + 16.0f * scale, RGBA8(255, 255, 255, 255), 0.8f * scale, type.c_str());
+        vita2d_pgf_draw_text(pgf, x + 8.0f * scale, y + 16.0f * scale, applyAlpha(RGBA8(255, 255, 255, 255), alpha), 0.8f * scale, type.c_str());
     }
 }
+
 
 void UIComponents::drawTopBar(
     const std::string& searchQuery,
@@ -58,7 +68,8 @@ void UIComponents::drawTopBar(
     bool isGridView,
     bool isSearchSelected,
     bool isSortSelected,
-    bool isLayoutSelected
+    bool isLayoutSelected,
+    bool isRefreshSelected
 ) {
     // Fundo da Top Bar
     vita2d_draw_rectangle(0, 0, 960, 68, UITheme::TopBar);
@@ -68,27 +79,25 @@ void UIComponents::drawTopBar(
     if (appIcon) {
         float texW = (float)vita2d_texture_get_width(appIcon);
         float texH = (float)vita2d_texture_get_height(appIcon);
-        float targetSize = 40.0f;
-        float scaleX = targetSize / (texW > 0 ? texW : 1.0f);
-        float scaleY = targetSize / (texH > 0 ? texH : 1.0f);
-        float iconX = 18.0f;
-        float iconY = 14.0f;
-        vita2d_draw_texture_scale(appIcon, iconX, iconY, scaleX, scaleY);
+        float targetSize = 38.0f;
+        float scaleX = targetSize / (texW > 0 ? texW : targetSize);
+        float scaleY = targetSize / (texH > 0 ? texH : targetSize);
+        vita2d_draw_texture_scale(appIcon, 20.0f, 15.0f, scaleX, scaleY);
 
         if (pgf) {
-            vita2d_pgf_draw_text(pgf, iconX + targetSize + 10.0f, 44, UITheme::Primary, 1.15f, "Bilingual Reader");
+            vita2d_pgf_draw_text(pgf, 68, 43, UITheme::TextPrimary, 1.15f, "Bilingual Reader");
         }
     } else if (pgf) {
-        vita2d_pgf_draw_text(pgf, 20, 44, UITheme::Primary, 1.15f, "Bilingual Reader");
+        vita2d_pgf_draw_text(pgf, 20, 43, UITheme::TextPrimary, 1.15f, "Bilingual Reader");
     }
 
     // Campo de Busca
-    float searchX = 275.0f;
+    float searchX = 270.0f;
     float searchY = 14.0f;
-    float searchW = 325.0f;
+    float searchW = 290.0f;
     float searchH = 40.0f;
 
-    unsigned int searchBg = isSearchSelected ? UITheme::SearchBarActive : UITheme::SearchBarBg;
+    unsigned int searchBg = isSearchActive ? UITheme::SearchBarActive : (isSearchSelected ? UITheme::SurfaceActive : UITheme::SearchBarBg);
     drawRoundedBox(searchX, searchY, searchW, searchH, 8.0f, searchBg);
 
     if (isSearchSelected) {
@@ -96,15 +105,21 @@ void UIComponents::drawTopBar(
     }
 
     if (pgf) {
-        std::string displayText = searchQuery.empty() ? "Pesquisar livros e mangas..." : searchQuery;
-        unsigned int textColor = searchQuery.empty() ? UITheme::TextSecondary : UITheme::TextPrimary;
-        vita2d_pgf_draw_text(pgf, searchX + 16.0f, searchY + 26.0f, textColor, 0.85f, displayText.c_str());
+        if (searchQuery.empty()) {
+            vita2d_pgf_draw_text(pgf, searchX + 16.0f, searchY + 26.0f, UITheme::TextSecondary, 0.85f, "Buscar... [X]");
+        } else {
+            std::string displayText = searchQuery;
+            if (displayText.length() > 20) {
+                displayText = displayText.substr(0, 17) + "...";
+            }
+            vita2d_pgf_draw_text(pgf, searchX + 16.0f, searchY + 26.0f, UITheme::TextPrimary, 0.85f, displayText.c_str());
+        }
     }
 
     // Botão de Ordenação
-    float sortX = 620.0f;
+    float sortX = 572.0f;
     float sortY = 14.0f;
-    float sortW = 180.0f;
+    float sortW = 166.0f;
     float sortH = 40.0f;
 
     unsigned int sortBg = isSortSelected ? UITheme::SurfaceActive : UITheme::Surface;
@@ -116,13 +131,13 @@ void UIComponents::drawTopBar(
 
     if (pgf) {
         std::string sortLabel = std::string("Ord: ") + FileBrowser::getSortModeName(currentSort);
-        vita2d_pgf_draw_text(pgf, sortX + 14.0f, sortY + 26.0f, UITheme::TextPrimary, 0.85f, sortLabel.c_str());
+        vita2d_pgf_draw_text(pgf, sortX + 12.0f, sortY + 26.0f, UITheme::TextPrimary, 0.82f, sortLabel.c_str());
     }
 
     // Botão de Alternância Lista / Grade
-    float layoutX = 816.0f;
+    float layoutX = 748.0f;
     float layoutY = 14.0f;
-    float layoutW = 120.0f;
+    float layoutW = 114.0f;
     float layoutH = 40.0f;
 
     unsigned int layoutBg = isLayoutSelected ? UITheme::SurfaceActive : UITheme::Surface;
@@ -134,20 +149,92 @@ void UIComponents::drawTopBar(
 
     if (pgf) {
         const char* modeText = isGridView ? "[ Grade ]" : "[ Lista ]";
-        vita2d_pgf_draw_text(pgf, layoutX + 18.0f, layoutY + 26.0f, UITheme::TextPrimary, 0.85f, modeText);
+        vita2d_pgf_draw_text(pgf, layoutX + 15.0f, layoutY + 26.0f, UITheme::TextPrimary, 0.85f, modeText);
+    }
+
+    // Botão de Refresh
+    float refreshX = 872.0f;
+    float refreshY = 14.0f;
+    float refreshW = 60.0f;
+    float refreshH = 40.0f;
+
+    unsigned int refreshBg = isRefreshSelected ? UITheme::SurfaceActive : UITheme::Surface;
+    drawRoundedBox(refreshX, refreshY, refreshW, refreshH, 8.0f, refreshBg);
+
+    if (isRefreshSelected) {
+        vita2d_draw_rectangle(refreshX, refreshY + 4.0f, 3.0f, refreshH - 8.0f, UITheme::Primary);
+    }
+
+    if (pgf) {
+        vita2d_pgf_draw_text(pgf, refreshX + 17.0f, refreshY + 26.0f, UITheme::TextPrimary, 0.90f, "[R]");
     }
 }
 
-void UIComponents::drawListCard(float x, float y, float w, float h, bool isSelected, const LibraryItem& item) {
+void UIComponents::drawConfirmDialog(const std::string& title, const std::string& message, bool isYesSelected) {
+    // Backdrop escuro semitransparente
+    vita2d_draw_rectangle(0, 0, 960, 544, RGBA8(0, 0, 0, 190));
+
+    float dlgW = 480.0f;
+    float dlgH = 210.0f;
+    float dlgX = (960.0f - dlgW) / 2.0f;
+    float dlgY = (544.0f - dlgH) / 2.0f;
+
+    // Caixa do diálogo
+    drawRoundedBox(dlgX, dlgY, dlgW, dlgH, 12.0f, UITheme::Surface);
+    vita2d_draw_rectangle(dlgX, dlgY, dlgW, 3.0f, RGBA8(239, 68, 68, 255));
+
+    if (pgf) {
+        // Título
+        vita2d_pgf_draw_text(pgf, dlgX + 24.0f, dlgY + 42.0f, UITheme::TextPrimary, 1.15f, title.c_str());
+
+        // Mensagem
+        std::string displayMsg = message;
+        if (displayMsg.length() > 46) {
+            displayMsg = displayMsg.substr(0, 43) + "...";
+        }
+        vita2d_pgf_draw_text(pgf, dlgX + 24.0f, dlgY + 85.0f, UITheme::TextSecondary, 0.90f, displayMsg.c_str());
+        vita2d_pgf_draw_text(pgf, dlgX + 24.0f, dlgY + 115.0f, UITheme::TextSecondary, 0.85f, "Esta acao nao pode ser desfeita.");
+    }
+
+    // Botão Excluir (Sim)
+    float btnY = dlgY + 145.0f;
+    float btnW = 195.0f;
+    float btnH = 42.0f;
+    float btnYesX = dlgX + 24.0f;
+    float btnNoX = dlgX + dlgW - 24.0f - btnW;
+
+    unsigned int yesBg = isYesSelected ? RGBA8(220, 38, 38, 255) : RGBA8(50, 25, 25, 255);
+    drawRoundedBox(btnYesX, btnY, btnW, btnH, 8.0f, yesBg);
+    if (isYesSelected) {
+        vita2d_draw_rectangle(btnYesX, btnY + 4.0f, 3.0f, btnH - 8.0f, RGBA8(255, 255, 255, 255));
+    }
+    if (pgf) {
+        vita2d_pgf_draw_text(pgf, btnYesX + 45.0f, btnY + 28.0f, UITheme::TextPrimary, 0.95f, "Excluir (X)");
+    }
+
+    // Botão Cancelar (Não)
+    unsigned int noBg = !isYesSelected ? UITheme::Primary : RGBA8(40, 46, 68, 255);
+    drawRoundedBox(btnNoX, btnY, btnW, btnH, 8.0f, noBg);
+    if (!isYesSelected) {
+        vita2d_draw_rectangle(btnNoX, btnY + 4.0f, 3.0f, btnH - 8.0f, RGBA8(255, 255, 255, 255));
+    }
+    if (pgf) {
+        vita2d_pgf_draw_text(pgf, btnNoX + 40.0f, btnY + 28.0f, UITheme::TextPrimary, 0.95f, "Cancelar (O)");
+    }
+}
+
+void UIComponents::drawListCard(float x, float y, float w, float h, bool isSelected, const LibraryItem& item, float alpha) {
+    if (alpha <= 0.01f) return;
+
     unsigned int bgColor = isSelected ? UITheme::SurfaceActive : UITheme::Surface;
-    drawRoundedBox(x, y, w, h, 8.0f, bgColor);
+    drawRoundedBox(x, y, w, h, 8.0f, applyAlpha(bgColor, alpha));
 
     if (isSelected) {
-        vita2d_draw_rectangle(x, y + 4.0f, 4.0f, h - 8.0f, UITheme::Primary);
+        vita2d_draw_rectangle(x, y + 4.0f, 4.0f, h - 8.0f, applyAlpha(UITheme::Primary, alpha));
     }
 
     // Badge
-    drawBadge(x + 16.0f, y + (h - 22.0f) / 2.0f, item.typeString);
+    drawBadge(x + 16.0f, y + (h - 22.0f) / 2.0f, item.typeString, 1.0f, alpha);
 
     // Título
     if (pgf) {
@@ -157,27 +244,29 @@ void UIComponents::drawListCard(float x, float y, float w, float h, bool isSelec
         }
         
         unsigned int titleColor = isSelected ? UITheme::TextPrimary : UITheme::TextSecondary;
-        vita2d_pgf_draw_text(pgf, x + 82.0f, y + 26.0f, titleColor, 1.0f, displayTitle.c_str());
+        vita2d_pgf_draw_text(pgf, x + 82.0f, y + 26.0f, applyAlpha(titleColor, alpha), 1.0f, displayTitle.c_str());
 
         // Indicador de favorito
         if (item.isFavorite) {
-            drawStar(x + w - 160.0f, y + 16.0f, 16.0f, UITheme::FavoriteGold);
-            vita2d_pgf_draw_text(pgf, x + w - 140.0f, y + 26.0f, UITheme::FavoriteGold, 0.8f, "FAV");
+            drawStar(x + w - 160.0f, y + 16.0f, 16.0f, applyAlpha(UITheme::FavoriteGold, alpha));
+            vita2d_pgf_draw_text(pgf, x + w - 140.0f, y + 26.0f, applyAlpha(UITheme::FavoriteGold, alpha), 0.8f, "FAV");
         }
 
         // Tamanho do arquivo
-        vita2d_pgf_draw_text(pgf, x + w - 90.0f, y + 26.0f, UITheme::TextSecondary, 0.8f, item.formattedSize.c_str());
+        vita2d_pgf_draw_text(pgf, x + w - 90.0f, y + 26.0f, applyAlpha(UITheme::TextSecondary, alpha), 0.8f, item.formattedSize.c_str());
     }
 }
 
-void UIComponents::drawGridCard(float x, float y, float w, float h, bool isSelected, const LibraryItem& item) {
+void UIComponents::drawGridCard(float x, float y, float w, float h, bool isSelected, const LibraryItem& item, float alpha) {
+    if (alpha <= 0.01f) return;
+
     unsigned int bgColor = isSelected ? UITheme::SurfaceActive : UITheme::Surface;
-    drawRoundedBox(x, y, w, h, 12.0f, bgColor);
+    drawRoundedBox(x, y, w, h, 12.0f, applyAlpha(bgColor, alpha));
 
     // Borda de seleção
     if (isSelected) {
-        drawRoundedBox(x - 2.0f, y - 2.0f, w + 4.0f, h + 4.0f, 14.0f, UITheme::Primary);
-        drawRoundedBox(x, y, w, h, 12.0f, bgColor);
+        drawRoundedBox(x - 2.0f, y - 2.0f, w + 4.0f, h + 4.0f, 14.0f, applyAlpha(UITheme::Primary, alpha));
+        drawRoundedBox(x, y, w, h, 12.0f, applyAlpha(bgColor, alpha));
     }
 
     // Bloco simulando a Capa
@@ -187,14 +276,14 @@ void UIComponents::drawGridCard(float x, float y, float w, float h, bool isSelec
     float coverY = y + 8.0f;
 
     unsigned int coverBg = isSelected ? RGBA8(46, 52, 75, 255) : RGBA8(20, 24, 36, 255);
-    drawRoundedBox(coverX, coverY, coverW, coverH, 8.0f, coverBg);
+    drawRoundedBox(coverX, coverY, coverW, coverH, 8.0f, applyAlpha(coverBg, alpha));
 
     // Grande Badge no centro da capa
-    drawBadge(coverX + (coverW - 64.0f) / 2.0f, coverY + (coverH - 26.0f) / 2.0f, item.typeString, 1.2f);
+    drawBadge(coverX + (coverW - 64.0f) / 2.0f, coverY + (coverH - 26.0f) / 2.0f, item.typeString, 1.2f, alpha);
 
     // Indicador de Favorito no canto superior direito da capa
     if (item.isFavorite) {
-        drawStar(coverX + coverW - 22.0f, coverY + 6.0f, 14.0f, UITheme::FavoriteGold);
+        drawStar(coverX + coverW - 22.0f, coverY + 6.0f, 14.0f, applyAlpha(UITheme::FavoriteGold, alpha));
     }
 
     // Título abreviado embaixo
@@ -204,12 +293,40 @@ void UIComponents::drawGridCard(float x, float y, float w, float h, bool isSelec
             displayTitle = displayTitle.substr(0, 19) + "...";
         }
         unsigned int titleColor = isSelected ? UITheme::TextPrimary : UITheme::TextSecondary;
-        vita2d_pgf_draw_text(pgf, x + 10.0f, y + coverH + 28.0f, titleColor, 0.9f, displayTitle.c_str());
+        vita2d_pgf_draw_text(pgf, x + 10.0f, y + coverH + 28.0f, applyAlpha(titleColor, alpha), 0.9f, displayTitle.c_str());
 
         // Tamanho do arquivo
-        vita2d_pgf_draw_text(pgf, x + 10.0f, y + coverH + 50.0f, UITheme::TextSecondary, 0.75f, item.formattedSize.c_str());
+        vita2d_pgf_draw_text(pgf, x + 10.0f, y + coverH + 50.0f, applyAlpha(UITheme::TextSecondary, alpha), 0.75f, item.formattedSize.c_str());
     }
 }
+
+void UIComponents::drawLibraryScrollBar(float currentOffset, int totalItems, int visibleCapacity, bool isGridView, float alpha) {
+    if (totalItems <= visibleCapacity || totalItems <= 0) return;
+    if (alpha <= 0.01f) return;
+
+    float trackX = 948.0f;
+    float trackY = 80.0f;
+    float trackH = 412.0f;
+    float trackW = 5.0f;
+
+    // Fundo do trilho da scrollbar
+    drawRoundedBox(trackX, trackY, trackW, trackH, 2.5f, applyAlpha(RGBA8(255, 255, 255, 35), alpha));
+
+    // Altura do thumb proporcional ao número de itens visíveis
+    float maxScroll = static_cast<float>(totalItems - visibleCapacity);
+    if (maxScroll < 1.0f) maxScroll = 1.0f;
+
+    float thumbRatio = static_cast<float>(visibleCapacity) / static_cast<float>(totalItems);
+    float thumbH = std::max(32.0f, trackH * thumbRatio);
+    float availableTravel = trackH - thumbH;
+
+    float clampedOffset = std::max(0.0f, std::min(currentOffset, maxScroll));
+    float thumbY = trackY + (clampedOffset / maxScroll) * availableTravel;
+
+    // Desenha o thumb
+    drawRoundedBox(trackX, thumbY, trackW, thumbH, 2.5f, applyAlpha(UITheme::Primary, alpha));
+}
+
 
 void UIComponents::drawFooter(const std::string& controlsHint) {
     vita2d_draw_rectangle(0, 504, 960, 40, UITheme::TopBar);
@@ -217,5 +334,55 @@ void UIComponents::drawFooter(const std::string& controlsHint) {
 
     if (pgf) {
         vita2d_pgf_draw_text(pgf, 24, 528, UITheme::TextSecondary, 0.85f, controlsHint.c_str());
+    }
+}
+
+void UIComponents::drawReaderProgressBar(int currentPage, int totalPages, bool isHudVisible) {
+    if (totalPages <= 0) return;
+
+    float progressRatio = static_cast<float>(currentPage + 1) / static_cast<float>(totalPages);
+    if (progressRatio > 1.0f) progressRatio = 1.0f;
+    if (progressRatio < 0.0f) progressRatio = 0.0f;
+
+    // Se o HUD estiver visível, desenha uma barra completa com informações no rodapé
+    if (isHudVisible) {
+        float hudHeight = 44.0f;
+        float hudY = 544.0f - hudHeight;
+
+        // Fundo semitransparente escuro
+        vita2d_draw_rectangle(0, hudY, 960, hudHeight, UITheme::ProgressBarBg);
+        vita2d_draw_line(0, hudY, 960, hudY, RGBA8(60, 66, 92, 180));
+
+        // Barra de progresso horizontal
+        float barX = 140.0f;
+        float barY = hudY + 18.0f;
+        float barW = 680.0f;
+        float barH = 8.0f;
+
+        drawRoundedBox(barX, barY, barW, barH, 4.0f, RGBA8(50, 56, 78, 255));
+        if (progressRatio > 0.0f) {
+            drawRoundedBox(barX, barY, barW * progressRatio, barH, 4.0f, UITheme::ProgressBarFill);
+            // Ponto indicador do slider
+            vita2d_draw_fill_circle(barX + (barW * progressRatio), barY + (barH / 2.0f), 7.0f, UITheme::TextPrimary);
+        }
+
+        if (pgf) {
+            // Texto da página (ex: "1 / 45")
+            char pageStr[32];
+            snprintf(pageStr, sizeof(pageStr), "%d / %d", currentPage + 1, totalPages);
+            vita2d_pgf_draw_text(pgf, 20.0f, hudY + 28.0f, UITheme::TextPrimary, 0.85f, pageStr);
+
+            // Porcentagem
+            char percentStr[16];
+            snprintf(percentStr, sizeof(percentStr), "%d%%", static_cast<int>(progressRatio * 100.0f));
+            vita2d_pgf_draw_text(pgf, 840.0f, hudY + 28.0f, UITheme::TextSecondary, 0.85f, percentStr);
+        }
+    } else {
+        // Barra discreta e fina no fundo da tela
+        float barW = 960.0f * progressRatio;
+        vita2d_draw_rectangle(0, 540, 960, 4, RGBA8(0, 0, 0, 100));
+        if (barW > 0.0f) {
+            vita2d_draw_rectangle(0, 540, barW, 4, UITheme::ProgressBarFill);
+        }
     }
 }

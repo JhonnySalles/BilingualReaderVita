@@ -16,12 +16,20 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -Wall -std=c++17")
 
 include_directories(
   ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/libs/mupdf/include
+)
+
+link_directories(
+  ${CMAKE_CURRENT_SOURCE_DIR}/libs/mupdf/lib
 )
 
 set(SOURCES
   src/main.cpp
   src/ui_components.cpp
   src/file_browser.cpp
+  src/file_utils.cpp
+  src/cache_manager.cpp
+  src/parses/parse_tar.cpp
   src/reader_txt.cpp
   src/reader_cbz.cpp
   src/reader_epub.cpp
@@ -30,12 +38,15 @@ set(SOURCES
 add_executable(${PROJECT_NAME} ${SOURCES})
 
 target_link_libraries(${PROJECT_NAME}
+  mupdf
+  mupdf-third
   vita2d
   freetype
   png
   jpeg
   z
   m
+  pthread
   SceDisplay_stub
   SceGxm_stub
   SceCtrl_stub
@@ -55,4 +66,5 @@ vita_create_vpk(${PROJECT_NAME}.vpk "BREADPSV" eboot.bin
   NAME "Bilingual Reader"
   FILE sce_sys/icon0.png sce_sys/icon0.png
   FILE assets/images/app_icon.png assets/images/app_icon.png
+  FILE assets/images/app_icon_small.png assets/images/app_icon_small.png
 )
