@@ -1,5 +1,6 @@
 #include <vita2d.h>
 #include <psp2/ctrl.h>
+#include <psp2/touch.h>
 #include <psp2/kernel/processmgr.h>
 #include <psp2/ime_dialog.h>
 #include <vector>
@@ -74,6 +75,9 @@ int main(int argc, char* argv[]) {
     vita2d_init();
     vita2d_set_clear_color(UITheme::Background);
 
+    // Habilita amostragem do Touch Frontal
+    sceTouchSetSamplingState(SCE_TOUCH_PORT_FRONT, SCE_TOUCH_SAMPLING_STATE_START);
+
     vita2d_pgf* pgf = vita2d_load_default_pgf();
     UIComponents::init(pgf);
 
@@ -96,6 +100,36 @@ int main(int argc, char* argv[]) {
 
     SceCtrlData pad;
     SceCtrlData oldPad;
+    SceTouchData touch;
+    int oldTouchNum = 0;
+
+    auto openItem = [&](int idx) {
+        if (idx >= 0 && idx < static_cast<int>(visibleItems.size())) {
+            auto& selected = visibleItems[idx];
+            FileBrowser::markAsRead(selected);
+            for (auto& orig : allItems) {
+                if (orig.filename == selected.filename) {
+                    orig.lastReadTime = selected.lastReadTime;
+                    break;
+                }
+            }
+            FileBrowser::saveMetadata(allItems);
+
+            if (selected.type == FileType::TXT) {
+                if (readerTxt.loadFile(selected.fullPath, pgf)) {
+                    currentState = AppState::READ_TXT;
+                }
+            } else if (selected.type == FileType::CBZ) {
+                if (readerCbz.loadFile(selected.fullPath)) {
+                    currentState = AppState::READ_CBZ;
+                }
+            } else if (selected.type == FileType::EPUB) {
+                if (readerEpub.loadFile(selected.fullPath, pgf)) {
+                    currentState = AppState::READ_EPUB;
+                }
+            }
+        }
+    };
 
     while (true) {
         // Manipulação do teclado nativo do PS Vita
@@ -127,12 +161,98 @@ int main(int argc, char* argv[]) {
         sceCtrlPeekBufferPositive(0, &pad, 1);
         unsigned int pressed = pad.buttons & ~oldPad.buttons;
 
+        sceTouchPeek(SCE_TOUCH_PORT_FRONT, &touch, 1);
+        bool touchPressed = (touch.reportNum > 0 && oldTouchNum == 0);
+        int touchX = 0;
+        int touchY = 0;
+        if (touch.reportNum > 0) {
+            // Converte coordenadas do painel (1920x1088) para a tela (960x544)
+            touchX = touch.report[0].x / 2;
+            touchY = touch.report[0].y / 2;
+        }
+        oldTouchNum = touch.reportNum;
+
         if (currentState == AppState::MENU) {
             const int gridCols = 3;
             const int listVisibleCount = 5;
             const int gridVisibleCount = 6; // 3 colunas x 2 linhas
 
-            // NAVEGAÇÃO ENTRE ÁREAS DE FOCO
+            // PROCESSAMENTO DE TOUCH NO MENU
+            if (touchPressed) {
+                // 1. Campo de Busca (X: 260..600, Y: 14..54)
+                if (touchX >= 260 && touchX <= 600 && touchY >= 14 && touchY <= 54) {
+                    currentFocus = FocusArea::SEARCH;
+                    launch_ime("Pesquisar", searchQuery.c_str());
+                }
+                // 2. Botão de Ordenação (X: 620..800, Y: 14..54)
+                else if (touchX >= 620 && touchX <= 800 && touchY >= 14 && touchY <= 54) {
+                    currentFocus = FocusArea::SORT;
+                    int nextSort = (static_cast<int>(currentSort) + 1) % static_cast<int>(SortMode::COUNT);
+                    currentSort = static_cast<SortMode>(nextSort);
+                    FileBrowser::sortItems(allItems, currentSort);
+                    visibleItems = FileBrowser::filterItems(allItems, searchQuery);
+                    selectedIndex = 0;
+                    scrollOffset = 0;
+                }
+                // 3. Botão de Alternância de Layout (X: 816..936, Y: 14..54)
+                else if (touchX >= 816 && touchX <= 936 && touchY >= 14 && touchY <= 54) {
+                    currentFocus = FocusArea::LAYOUT;
+                    isGridView = !isGridView;
+                    selectedIndex = 0;
+                    scrollOffset = 0;
+                }
+                // 4. Seleção e Abertura de Itens (Toque único seleciona, toque repetido abre)
+                else if (!visibleItems.empty()) {
+                    if (!isGridView) {
+                        float startY = 86.0f;
+                        float cardHeight = 64.0f;
+                        float cardSpacing = 14.0f;
+                        int renderCount = std::min(static_cast<int>(visibleItems.size()) - scrollOffset, listVisibleCount);
+
+                        for (int i = 0; i < renderCount; i++) {
+                            float y = startY + i * (cardHeight + cardSpacing);
+                            if (touchX >= 32 && touchX <= 928 && touchY >= y && touchY <= (y + cardHeight)) {
+                                int itemIdx = scrollOffset + i;
+                                if (currentFocus == FocusArea::CONTENT && selectedIndex == itemIdx) {
+                                    openItem(itemIdx);
+                                } else {
+                                    currentFocus = FocusArea::CONTENT;
+                                    selectedIndex = itemIdx;
+                                }
+                                break;
+                            }
+                        }
+                    } else {
+                        float startX = 32.0f;
+                        float startY = 86.0f;
+                        float cardW = 282.0f;
+                        float cardH = 192.0f;
+                        float gapX = 25.0f;
+                        float gapY = 16.0f;
+                        int renderCount = std::min(static_cast<int>(visibleItems.size()) - scrollOffset, gridVisibleCount);
+
+                        for (int i = 0; i < renderCount; i++) {
+                            int col = i % gridCols;
+                            int row = i / gridCols;
+                            float x = startX + col * (cardW + gapX);
+                            float y = startY + row * (cardH + gapY);
+
+                            if (touchX >= x && touchX <= (x + cardW) && touchY >= y && touchY <= (y + cardH)) {
+                                int itemIdx = scrollOffset + i;
+                                if (currentFocus == FocusArea::CONTENT && selectedIndex == itemIdx) {
+                                    openItem(itemIdx);
+                                } else {
+                                    currentFocus = FocusArea::CONTENT;
+                                    selectedIndex = itemIdx;
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // NAVEGAÇÃO ENTRE ÁREAS DE FOCO VIA D-PAD
             if (currentFocus == FocusArea::CONTENT) {
                 if (isGridView) {
                     // Modo Grade
@@ -201,29 +321,7 @@ int main(int argc, char* argv[]) {
 
                 // Abrir Arquivo com Cruz
                 if ((pressed & SCE_CTRL_CROSS) && !visibleItems.empty()) {
-                    auto& selected = visibleItems[selectedIndex];
-                    FileBrowser::markAsRead(selected);
-                    for (auto& orig : allItems) {
-                        if (orig.filename == selected.filename) {
-                            orig.lastReadTime = selected.lastReadTime;
-                            break;
-                        }
-                    }
-                    FileBrowser::saveMetadata(allItems);
-
-                    if (selected.type == FileType::TXT) {
-                        if (readerTxt.loadFile(selected.fullPath, pgf)) {
-                            currentState = AppState::READ_TXT;
-                        }
-                    } else if (selected.type == FileType::CBZ) {
-                        if (readerCbz.loadFile(selected.fullPath)) {
-                            currentState = AppState::READ_CBZ;
-                        }
-                    } else if (selected.type == FileType::EPUB) {
-                        if (readerEpub.loadFile(selected.fullPath, pgf)) {
-                            currentState = AppState::READ_EPUB;
-                        }
-                    }
+                    openItem(selectedIndex);
                 }
             } else if (currentFocus == FocusArea::SEARCH) {
                 if (pressed & SCE_CTRL_DOWN) currentFocus = FocusArea::CONTENT;
@@ -335,10 +433,10 @@ int main(int argc, char* argv[]) {
             vita2d_swap_buffers();
 
         } else if (currentState == AppState::READ_TXT) {
-            if ((pressed & SCE_CTRL_RIGHT) || (pressed & SCE_CTRL_RTRIGGER)) {
+            if ((pressed & SCE_CTRL_RIGHT) || (pressed & SCE_CTRL_RTRIGGER) || (touchPressed && touchX > 640)) {
                 readerTxt.nextPage();
             }
-            if ((pressed & SCE_CTRL_LEFT) || (pressed & SCE_CTRL_LTRIGGER)) {
+            if ((pressed & SCE_CTRL_LEFT) || (pressed & SCE_CTRL_LTRIGGER) || (touchPressed && touchX < 320)) {
                 readerTxt.prevPage();
             }
             if (pressed & SCE_CTRL_CIRCLE) {
@@ -353,10 +451,10 @@ int main(int argc, char* argv[]) {
             vita2d_swap_buffers();
 
         } else if (currentState == AppState::READ_CBZ) {
-            if ((pressed & SCE_CTRL_RIGHT) || (pressed & SCE_CTRL_RTRIGGER)) {
+            if ((pressed & SCE_CTRL_RIGHT) || (pressed & SCE_CTRL_RTRIGGER) || (touchPressed && touchX > 640)) {
                 readerCbz.nextPage();
             }
-            if ((pressed & SCE_CTRL_LEFT) || (pressed & SCE_CTRL_LTRIGGER)) {
+            if ((pressed & SCE_CTRL_LEFT) || (pressed & SCE_CTRL_LTRIGGER) || (touchPressed && touchX < 320)) {
                 readerCbz.prevPage();
             }
             if (pressed & SCE_CTRL_CIRCLE) {
@@ -371,10 +469,10 @@ int main(int argc, char* argv[]) {
             vita2d_swap_buffers();
 
         } else if (currentState == AppState::READ_EPUB) {
-            if ((pressed & SCE_CTRL_RIGHT) || (pressed & SCE_CTRL_RTRIGGER)) {
+            if ((pressed & SCE_CTRL_RIGHT) || (pressed & SCE_CTRL_RTRIGGER) || (touchPressed && touchX > 640)) {
                 readerEpub.nextPage();
             }
-            if ((pressed & SCE_CTRL_LEFT) || (pressed & SCE_CTRL_LTRIGGER)) {
+            if ((pressed & SCE_CTRL_LEFT) || (pressed & SCE_CTRL_LTRIGGER) || (touchPressed && touchX < 320)) {
                 readerEpub.prevPage();
             }
             if (pressed & SCE_CTRL_CIRCLE) {

@@ -49,7 +49,8 @@ target_link_libraries(${PROJECT_NAME}
   SceIme_stub
 )
 
-vita_create_self(${PROJECT_NAME}.velf ${PROJECT_NAME})
-vita_create_vpk(${PROJECT_NAME}.vpk "BILIREA01" ${PROJECT_NAME}.velf
+vita_create_self(eboot.bin ${PROJECT_NAME} UNSAFE)
+vita_create_vpk(${PROJECT_NAME}.vpk "BILIREA01" eboot.bin
+  VERSION "01.00"
   NAME "Bilingual Reader Vita"
 )
