@@ -23,6 +23,7 @@ namespace UITheme {
 class UIComponents {
 public:
     static void init(vita2d_pgf* defaultPgf);
+    static void shutdown();
     static void drawRoundedBox(float x, float y, float w, float h, float radius, unsigned int color);
     
     // Top Bar com Campo de Pesquisa, Ícone de Ordenação e Alternância de Grid/Lista
@@ -47,4 +48,5 @@ public:
 
 private:
     static vita2d_pgf* pgf;
+    static vita2d_texture* appIcon;
 };

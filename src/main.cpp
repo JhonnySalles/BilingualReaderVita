@@ -490,6 +490,7 @@ int main(int argc, char* argv[]) {
         oldPad = pad;
     }
 
+    UIComponents::shutdown();
     vita2d_free_pgf(pgf);
     vita2d_fini();
     sceKernelExitProcess(0);

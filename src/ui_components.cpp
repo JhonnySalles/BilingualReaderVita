@@ -2,9 +2,23 @@
 #include <algorithm>
 
 vita2d_pgf* UIComponents::pgf = nullptr;
+vita2d_texture* UIComponents::appIcon = nullptr;
 
 void UIComponents::init(vita2d_pgf* defaultPgf) {
     pgf = defaultPgf;
+    if (!appIcon) {
+        appIcon = vita2d_load_PNG_file("app0:assets/images/app_icon.png");
+        if (!appIcon) appIcon = vita2d_load_PNG_file("app0:app_icon.png");
+        if (!appIcon) appIcon = vita2d_load_PNG_file("assets/images/app_icon.png");
+        if (!appIcon) appIcon = vita2d_load_PNG_file("app_icon.png");
+    }
+}
+
+void UIComponents::shutdown() {
+    if (appIcon) {
+        vita2d_free_texture(appIcon);
+        appIcon = nullptr;
+    }
 }
 
 void UIComponents::drawRoundedBox(float x, float y, float w, float h, float radius, unsigned int color) {
@@ -50,15 +64,28 @@ void UIComponents::drawTopBar(
     vita2d_draw_rectangle(0, 0, 960, 68, UITheme::TopBar);
     vita2d_draw_line(0, 68, 960, 68, RGBA8(42, 48, 70, 255));
 
-    // Logo / Nome do App à esquerda
-    if (pgf) {
-        vita2d_pgf_draw_text(pgf, 24, 42, UITheme::Primary, 1.2f, "BilingualReader");
+    // Logo / Ícone e Nome do App à esquerda
+    if (appIcon) {
+        float texW = (float)vita2d_texture_get_width(appIcon);
+        float texH = (float)vita2d_texture_get_height(appIcon);
+        float targetSize = 40.0f;
+        float scaleX = targetSize / (texW > 0 ? texW : 1.0f);
+        float scaleY = targetSize / (texH > 0 ? texH : 1.0f);
+        float iconX = 18.0f;
+        float iconY = 14.0f;
+        vita2d_draw_texture_scale(appIcon, iconX, iconY, scaleX, scaleY);
+
+        if (pgf) {
+            vita2d_pgf_draw_text(pgf, iconX + targetSize + 10.0f, 44, UITheme::Primary, 1.15f, "Bilingual Reader");
+        }
+    } else if (pgf) {
+        vita2d_pgf_draw_text(pgf, 20, 44, UITheme::Primary, 1.15f, "Bilingual Reader");
     }
 
     // Campo de Busca
-    float searchX = 260.0f;
+    float searchX = 275.0f;
     float searchY = 14.0f;
-    float searchW = 340.0f;
+    float searchW = 325.0f;
     float searchH = 40.0f;
 
     unsigned int searchBg = isSearchSelected ? UITheme::SearchBarActive : UITheme::SearchBarBg;

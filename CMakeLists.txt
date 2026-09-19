@@ -50,7 +50,9 @@ target_link_libraries(${PROJECT_NAME}
 )
 
 vita_create_self(eboot.bin ${PROJECT_NAME} UNSAFE)
-vita_create_vpk(${PROJECT_NAME}.vpk "BILIREA01" eboot.bin
+vita_create_vpk(${PROJECT_NAME}.vpk "BREADPSV" eboot.bin
   VERSION "01.00"
-  NAME "Bilingual Reader Vita"
+  NAME "Bilingual Reader"
+  FILE sce_sys/icon0.png sce_sys/icon0.png
+  FILE assets/images/app_icon.png assets/images/app_icon.png
 )
