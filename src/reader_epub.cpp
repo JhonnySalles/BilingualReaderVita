@@ -101,12 +101,9 @@ void ReaderEPUB::setRotated(bool rotated) {
     if (isRotated != rotated) {
         isRotated = rotated;
         int savedPage = currentPage;
-        std::string savedPath = filePath;
-        if (!savedPath.empty()) {
-            loadFile(savedPath, nullptr);
-            currentPage = std::max(0, std::min(savedPage, totalPages - 1));
-            renderCurrentPageToTexture();
-        }
+        relayout();
+        currentPage = std::max(0, std::min(savedPage, totalPages - 1));
+        renderCurrentPageToTexture();
     }
 }
 
@@ -115,12 +112,9 @@ void ReaderEPUB::increaseFontSize() {
     if (fz_is_document_reflowable(ctx, doc) && currentFontSize < 24.0f) {
         currentFontSize += 1.0f;
         int savedPage = currentPage;
-        std::string savedPath = filePath;
-        if (!savedPath.empty()) {
-            loadFile(savedPath, nullptr);
-            currentPage = std::max(0, std::min(savedPage, totalPages - 1));
-            renderCurrentPageToTexture();
-        }
+        relayout();
+        currentPage = std::max(0, std::min(savedPage, totalPages - 1));
+        renderCurrentPageToTexture();
     }
 }
 
@@ -129,12 +123,9 @@ void ReaderEPUB::decreaseFontSize() {
     if (fz_is_document_reflowable(ctx, doc) && currentFontSize > 7.0f) {
         currentFontSize -= 1.0f;
         int savedPage = currentPage;
-        std::string savedPath = filePath;
-        if (!savedPath.empty()) {
-            loadFile(savedPath, nullptr);
-            currentPage = std::max(0, std::min(savedPage, totalPages - 1));
-            renderCurrentPageToTexture();
-        }
+        relayout();
+        currentPage = std::max(0, std::min(savedPage, totalPages - 1));
+        renderCurrentPageToTexture();
     }
 }
 
@@ -260,6 +251,6 @@ void ReaderEPUB::render(vita2d_pgf* font, bool fullscreen) {
 
     if (!fullscreen) {
         UIComponents::drawReaderProgressBar(currentPage, totalPages, false);
-        UIComponents::drawFooter("D-Pad: Paginas | Cima/Baixo: Fonte | O: Voltar", true);
+        UIComponents::drawFooter("D-Pad: Paginas | /\\/[]: Fonte | O: Voltar", true);
     }
 }

@@ -136,5 +136,22 @@ bool readMagicBytes(const std::string& path, unsigned char* buffer, size_t size)
     fclose(f);
     return (readCount == size);
 }
+bool copyFile(const std::string& src, const std::string& dst) {
+    FILE* sf = fopen(src.c_str(), "rb");
+    if (!sf) return false;
+    FILE* df = fopen(dst.c_str(), "wb");
+    if (!df) {
+        fclose(sf);
+        return false;
+    }
+    char buffer[4096];
+    size_t bytes;
+    while ((bytes = fread(buffer, 1, sizeof(buffer), sf)) > 0) {
+        fwrite(buffer, 1, bytes, df);
+    }
+    fclose(sf);
+    fclose(df);
+    return true;
+}
 
 } // namespace FileUtils

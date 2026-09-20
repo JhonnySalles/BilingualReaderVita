@@ -25,6 +25,9 @@ bool makeDirRecursive(const std::string& path);
 // Remove diretório e seu conteúdo recursivamente
 bool removeDirRecursive(const std::string& path);
 
+// Copia arquivo de src para dst
+bool copyFile(const std::string& src, const std::string& dst);
+
 // Gera uma string randômica alfanumérica (ex: para sessões de leitura no cache)
 std::string generateRandomId(size_t length = 8);
 

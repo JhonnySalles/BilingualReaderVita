@@ -1,6 +1,7 @@
 #include "reader_cbz.h"
 #include "ui_components.h"
 #include "file_utils.h"
+#include "parses/parse_rar.h"
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
@@ -18,7 +19,8 @@ ReaderCBZ::ReaderCBZ()
       currentTexture(nullptr), 
       zoomScale(1.0f), 
       panX(0.0f), 
-      panY(0.0f) {
+      panY(0.0f),
+      rarParser(nullptr) {
 }
 
 ReaderCBZ::~ReaderCBZ() {
@@ -68,6 +70,11 @@ void ReaderCBZ::close() {
         ctx = nullptr;
     }
 
+    if (rarParser) {
+        delete rarParser;
+        rarParser = nullptr;
+    }
+
     currentPage = 0;
     totalPages = 0;
     filename = "";
@@ -86,6 +93,20 @@ bool ReaderCBZ::loadFile(const std::string& path) {
     std::string ext = FileUtils::getExtension(path);
     std::transform(ext.begin(), ext.end(), ext.begin(), ::toupper);
     typeString = ext.empty() ? "CBZ" : ext;
+
+    if (typeString == "RAR" || typeString == "CBR") {
+        rarParser = new ParseRar();
+        if (rarParser->open(path)) {
+            totalPages = rarParser->getPageCount();
+            currentPage = 0;
+            loadPageTexture(0);
+            resetZoom();
+            return true;
+        } else {
+            close();
+            return false;
+        }
+    }
 
     // Inicializa o contexto MuPDF com limite de cache estrito (16MB)
     ctx = fz_new_context(NULL, NULL, 16 * 1024 * 1024);
@@ -128,8 +149,14 @@ void ReaderCBZ::setRotated(bool rotated) {
 
 void ReaderCBZ::loadPageTexture(int pageIndex) {
     freeTexture();
-    if (!doc || !ctx || totalPages <= 0) return;
     if (pageIndex < 0 || pageIndex >= totalPages) return;
+
+    if (rarParser) {
+        currentTexture = rarParser->loadPageTexture(pageIndex);
+        return;
+    }
+
+    if (!doc || !ctx || totalPages <= 0) return;
 
     fz_page* page = nullptr;
     fz_try(ctx) {
@@ -223,26 +250,6 @@ void ReaderCBZ::render(vita2d_pgf* font, bool fullscreen) {
     // Fundo escuro focado para leitura de mangá
     vita2d_draw_rectangle(0, 0, 960, 544, RGBA8(10, 10, 12, 255));
 
-    if (!fullscreen) {
-        char pageInfo[64];
-        if (zoomScale > 1.01f || zoomScale < 0.99f) {
-            snprintf(pageInfo, sizeof(pageInfo), "Pag %d / %d (Zoom: %.0f%%)", currentPage + 1, totalPages > 0 ? totalPages : 1, zoomScale * 100.0f);
-        } else {
-            snprintf(pageInfo, sizeof(pageInfo), "Pag %d / %d", currentPage + 1, totalPages > 0 ? totalPages : 1);
-        }
-        
-        unsigned int badgeColor = UITheme::BadgeCBZ;
-        if (typeString == "ZIP") badgeColor = UITheme::BadgeZIP;
-        else if (typeString == "CBR") badgeColor = UITheme::BadgeCBR;
-        else if (typeString == "RAR") badgeColor = UITheme::BadgeRAR;
-        else if (typeString == "CBT") badgeColor = UITheme::BadgeCBT;
-        else if (typeString == "TAR") badgeColor = UITheme::BadgeTAR;
-        else if (typeString == "CB7") badgeColor = UITheme::BadgeCB7;
-        else if (typeString == "7Z") badgeColor = UITheme::Badge7Z;
-
-        UIComponents::drawReaderTopBar(filename, pageInfo, isRotated, badgeColor);
-    }
-
     if (currentTexture) {
         unsigned int texW = vita2d_texture_get_width(currentTexture);
         unsigned int texH = vita2d_texture_get_height(currentTexture);
@@ -274,6 +281,23 @@ void ReaderCBZ::render(vita2d_pgf* font, bool fullscreen) {
     }
 
     if (!fullscreen) {
+        char pageInfo[64];
+        if (zoomScale > 1.01f || zoomScale < 0.99f) {
+            snprintf(pageInfo, sizeof(pageInfo), "Pag %d / %d (Zoom: %.0f%%)", currentPage + 1, totalPages > 0 ? totalPages : 1, zoomScale * 100.0f);
+        } else {
+            snprintf(pageInfo, sizeof(pageInfo), "Pag %d / %d", currentPage + 1, totalPages > 0 ? totalPages : 1);
+        }
+        
+        unsigned int badgeColor = UITheme::BadgeCBZ;
+        if (typeString == "ZIP") badgeColor = UITheme::BadgeZIP;
+        else if (typeString == "CBR") badgeColor = UITheme::BadgeCBR;
+        else if (typeString == "RAR") badgeColor = UITheme::BadgeRAR;
+        else if (typeString == "CBT") badgeColor = UITheme::BadgeCBT;
+        else if (typeString == "TAR") badgeColor = UITheme::BadgeTAR;
+        else if (typeString == "CB7") badgeColor = UITheme::BadgeCB7;
+        else if (typeString == "7Z") badgeColor = UITheme::Badge7Z;
+
+        UIComponents::drawReaderTopBar(filename, pageInfo, isRotated, badgeColor);
         UIComponents::drawReaderProgressBar(currentPage, totalPages, false);
         UIComponents::drawFooter("D-Pad: Paginas | Pinca: Zoom | Arraste: Mover | O: Voltar", true);
     }

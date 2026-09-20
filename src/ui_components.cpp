@@ -223,6 +223,58 @@ void UIComponents::drawConfirmDialog(const std::string& title, const std::string
     }
 }
 
+void UIComponents::drawProgressPopup(const std::string& title, const std::string& message, float progress) {
+    // Backdrop escuro semitransparente
+    vita2d_draw_rectangle(0, 0, 960, 544, RGBA8(0, 0, 0, 190));
+
+    float dlgW = 480.0f;
+    float dlgH = 190.0f;
+    float dlgX = (960.0f - dlgW) / 2.0f;
+    float dlgY = (544.0f - dlgH) / 2.0f;
+
+    // Caixa do diálogo
+    drawRoundedBox(dlgX, dlgY, dlgW, dlgH, 12.0f, UITheme::Surface);
+    vita2d_draw_rectangle(dlgX, dlgY, dlgW, 3.0f, UITheme::Primary);
+
+    if (pgf) {
+        // Título
+        vita2d_pgf_draw_text(pgf, dlgX + 24.0f, dlgY + 42.0f, UITheme::TextPrimary, 1.15f, title.c_str());
+
+        // Mensagem
+        std::string displayMsg = message;
+        if (displayMsg.length() > 46) {
+            displayMsg = displayMsg.substr(0, 43) + "...";
+        }
+        vita2d_pgf_draw_text(pgf, dlgX + 24.0f, dlgY + 80.0f, UITheme::TextSecondary, 0.90f, displayMsg.c_str());
+    }
+
+    // Barra de progresso
+    float barX = dlgX + 24.0f;
+    float barY = dlgY + 115.0f;
+    float barW = dlgW - 48.0f;
+    float barH = 12.0f;
+
+    drawRoundedBox(barX, barY, barW, barH, 6.0f, RGBA8(42, 48, 70, 255));
+    if (progress >= 0.0f) {
+        float p = std::max(0.0f, std::min(1.0f, progress));
+        drawRoundedBox(barX, barY, barW * p, barH, 6.0f, UITheme::Primary);
+    } else {
+        // Indicador de progresso pulsante quando indeterminado
+        static float pulse = 0.0f;
+        pulse += 0.04f;
+        if (pulse > 1.0f) pulse = 0.0f;
+        float pulseW = barW * 0.35f;
+        float pulseX = barX + (barW - pulseW) * pulse;
+        drawRoundedBox(pulseX, barY, pulseW, barH, 6.0f, UITheme::Primary);
+    }
+
+    if (pgf && progress >= 0.0f) {
+        char percentStr[16];
+        snprintf(percentStr, sizeof(percentStr), "%d%%", static_cast<int>(progress * 100.0f));
+        vita2d_pgf_draw_text(pgf, dlgX + dlgW - 70.0f, dlgY + 155.0f, UITheme::TextSecondary, 0.85f, percentStr);
+    }
+}
+
 void UIComponents::drawListCard(float x, float y, float w, float h, bool isSelected, const LibraryItem& item, float alpha) {
     if (alpha <= 0.01f) return;
 

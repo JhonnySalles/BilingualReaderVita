@@ -44,6 +44,8 @@ private:
     float panX;
     float panY;
 
+    class ParseRar* rarParser;
+
     void loadPageTexture(int pageIndex);
     void freeTexture();
 };

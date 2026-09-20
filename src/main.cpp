@@ -167,17 +167,21 @@ int main(int argc, char* argv[]) {
     };
 
     auto openPrevBook = [&]() {
-        if (visibleItems.empty()) return;
+        if (visibleItems.size() <= 1) return;
         int nextIdx = selectedIndex - 1;
         if (nextIdx < 0) nextIdx = static_cast<int>(visibleItems.size()) - 1;
-        openItem(nextIdx);
+        if (nextIdx != selectedIndex) {
+            openItem(nextIdx);
+        }
     };
 
     auto openNextBook = [&]() {
-        if (visibleItems.empty()) return;
+        if (visibleItems.size() <= 1) return;
         int nextIdx = selectedIndex + 1;
         if (nextIdx >= static_cast<int>(visibleItems.size())) nextIdx = 0;
-        openItem(nextIdx);
+        if (nextIdx != selectedIndex) {
+            openItem(nextIdx);
+        }
     };
 
     auto toggleRotation = [&]() {
@@ -269,7 +273,7 @@ int main(int argc, char* argv[]) {
                 } else if (touchHeld && readerIsTouching && !readerIsPinching) {
                     int totalDx = touchX - readerTouchStartX;
                     int totalDy = touchY - readerTouchStartY;
-                    if (std::hypot(totalDx, totalDy) > 15.0f) {
+                    if (std::hypot(totalDx, totalDy) > 25.0f) {
                         readerIsDragging = true;
                     }
 
@@ -282,7 +286,7 @@ int main(int argc, char* argv[]) {
                     readerLastTouchY = touchY;
                 }
             } else if (touchUp && readerIsTouching) {
-                // Ao soltar, se foi apenas clique rápido (sem arraste nem pinça)
+                // Ao soltar, se foi apenas clique rápido (sem arraste significativo nem pinça)
                 if (!readerIsDragging && !readerIsPinching) {
                     // Se não estiver em tela cheia, verifica se tocou nos botões das barras
                     bool handledBarTouch = false;
@@ -315,12 +319,12 @@ int main(int argc, char* argv[]) {
                         bool canTurnOrToggle = readerFullscreen || (readerTouchStartY >= 48 && readerTouchStartY < 504);
                         if (canTurnOrToggle) {
                             // Tela do PS Vita: 960x544
-                            // 20% esquerda: X < 192 (960 * 0.20) -> Página Anterior
-                            // 20% direita: X > 768 (960 * 0.80) -> Próxima Página
-                            // 60% centro: 192 <= X <= 768 -> Alterna Tela Cheia
-                            if (readerTouchStartX < 192) {
+                            // 25% esquerda: X < 240 -> Página Anterior
+                            // 25% direita: X > 720 -> Próxima Página
+                            // 50% centro: 240 <= X <= 720 -> Alterna Tela Cheia
+                            if (readerTouchStartX < 240) {
                                 readerTapLeft = true;
-                            } else if (readerTouchStartX > 768) {
+                            } else if (readerTouchStartX > 720) {
                                 readerTapRight = true;
                             } else {
                                 readerFullscreen = !readerFullscreen;
@@ -807,15 +811,17 @@ int main(int argc, char* argv[]) {
 
 
         } else if (currentState == AppState::READ_TXT) {
-            if (pressed & SCE_CTRL_RTRIGGER) {
-                openNextBook();
-            } else if (pressed & SCE_CTRL_LTRIGGER) {
-                openPrevBook();
+            if (pressed & (SCE_CTRL_RTRIGGER | SCE_CTRL_R1)) {
+                if (visibleItems.size() > 1) openNextBook();
+                else readerTxt.nextPage();
+            } else if (pressed & (SCE_CTRL_LTRIGGER | SCE_CTRL_L1)) {
+                if (visibleItems.size() > 1) openPrevBook();
+                else readerTxt.prevPage();
             } else {
-                if ((pressed & SCE_CTRL_RIGHT) || readerTapRight) {
+                if ((pressed & (SCE_CTRL_RIGHT | SCE_CTRL_DOWN)) || readerTapRight) {
                     readerTxt.nextPage();
                 }
-                if ((pressed & SCE_CTRL_LEFT) || readerTapLeft) {
+                if ((pressed & (SCE_CTRL_LEFT | SCE_CTRL_UP)) || readerTapLeft) {
                     readerTxt.prevPage();
                 }
             }
@@ -831,15 +837,17 @@ int main(int argc, char* argv[]) {
             vita2d_swap_buffers();
 
         } else if (currentState == AppState::READ_CBZ) {
-            if (pressed & SCE_CTRL_RTRIGGER) {
-                openNextBook();
-            } else if (pressed & SCE_CTRL_LTRIGGER) {
-                openPrevBook();
+            if (pressed & (SCE_CTRL_RTRIGGER | SCE_CTRL_R1)) {
+                if (visibleItems.size() > 1) openNextBook();
+                else readerCbz.nextPage();
+            } else if (pressed & (SCE_CTRL_LTRIGGER | SCE_CTRL_L1)) {
+                if (visibleItems.size() > 1) openPrevBook();
+                else readerCbz.prevPage();
             } else {
-                if ((pressed & SCE_CTRL_RIGHT) || readerTapRight) {
+                if ((pressed & (SCE_CTRL_RIGHT | SCE_CTRL_DOWN)) || readerTapRight) {
                     readerCbz.nextPage();
                 }
-                if ((pressed & SCE_CTRL_LEFT) || readerTapLeft) {
+                if ((pressed & (SCE_CTRL_LEFT | SCE_CTRL_UP)) || readerTapLeft) {
                     readerCbz.prevPage();
                 }
             }
@@ -855,22 +863,24 @@ int main(int argc, char* argv[]) {
             vita2d_swap_buffers();
 
         } else if (currentState == AppState::READ_EPUB) {
-            if (pressed & SCE_CTRL_RTRIGGER) {
-                openNextBook();
-            } else if (pressed & SCE_CTRL_LTRIGGER) {
-                openPrevBook();
+            if (pressed & (SCE_CTRL_RTRIGGER | SCE_CTRL_R1)) {
+                if (visibleItems.size() > 1) openNextBook();
+                else readerEpub.nextPage();
+            } else if (pressed & (SCE_CTRL_LTRIGGER | SCE_CTRL_L1)) {
+                if (visibleItems.size() > 1) openPrevBook();
+                else readerEpub.prevPage();
             } else {
-                if ((pressed & SCE_CTRL_RIGHT) || readerTapRight) {
+                if ((pressed & (SCE_CTRL_RIGHT | SCE_CTRL_DOWN)) || readerTapRight) {
                     readerEpub.nextPage();
                 }
-                if ((pressed & SCE_CTRL_LEFT) || readerTapLeft) {
+                if ((pressed & (SCE_CTRL_LEFT | SCE_CTRL_UP)) || readerTapLeft) {
                     readerEpub.prevPage();
                 }
             }
-            if (pressed & SCE_CTRL_UP) {
+            if (pressed & SCE_CTRL_TRIANGLE) {
                 readerEpub.increaseFontSize();
             }
-            if (pressed & SCE_CTRL_DOWN) {
+            if (pressed & SCE_CTRL_SQUARE) {
                 readerEpub.decreaseFontSize();
             }
             if (pressed & SCE_CTRL_CIRCLE) {

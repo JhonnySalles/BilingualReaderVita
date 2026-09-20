@@ -72,6 +72,9 @@ public:
     // Diálogo de Confirmação (Popup)
     static void drawConfirmDialog(const std::string& title, const std::string& message, bool isYesSelected);
 
+    // Diálogo de Progresso / Carregamento (Popup)
+    static void drawProgressPopup(const std::string& title, const std::string& message, float progress = -1.0f);
+
     // Utilitários
     static void drawFooter(const std::string& controlsHint, bool showBookNav = false);
     static void drawReaderTopBar(const std::string& title, const std::string& extraInfo, bool isRotated, unsigned int badgeColor = UITheme::Primary);
