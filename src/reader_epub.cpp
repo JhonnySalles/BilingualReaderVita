@@ -12,6 +12,7 @@ ReaderEPUB::ReaderEPUB()
     : currentPage(0), 
       totalPages(0), 
       currentFontSize(11.0f), 
+      isRotated(false),
       ctx(nullptr), 
       doc(nullptr), 
       pageTexture(nullptr) {
@@ -59,6 +60,7 @@ bool ReaderEPUB::loadFile(const std::string& path, vita2d_pgf* font) {
     if (!ctx) return false;
 
     fz_register_document_handlers(ctx);
+    fz_set_user_css(ctx, "body { color: #e2e8f0; background: transparent; } p, div, span, h1, h2, h3, h4, h5, h6, li, a { color: #e2e8f0; }");
 
     fz_try(ctx) {
         doc = fz_open_document(ctx, path.c_str());
@@ -84,9 +86,9 @@ void ReaderEPUB::relayout() {
     if (!doc || !ctx) return;
 
     if (fz_is_document_reflowable(ctx, doc)) {
-        // Dimensões úteis do leitor na tela do Vita (960x544, deixando margens para leitura confortável)
-        float layoutW = 900.0f;
-        float layoutH = 460.0f;
+        // Dimensões úteis dependendo da rotação
+        float layoutW = isRotated ? 480.0f : 900.0f;
+        float layoutH = isRotated ? 880.0f : 460.0f;
         fz_layout_document(ctx, doc, layoutW, layoutH, currentFontSize);
     }
 
@@ -95,12 +97,30 @@ void ReaderEPUB::relayout() {
     if (currentPage >= totalPages) currentPage = totalPages - 1;
 }
 
+void ReaderEPUB::setRotated(bool rotated) {
+    if (isRotated != rotated) {
+        isRotated = rotated;
+        int savedPage = currentPage;
+        std::string savedPath = filePath;
+        if (!savedPath.empty()) {
+            loadFile(savedPath, nullptr);
+            currentPage = std::max(0, std::min(savedPage, totalPages - 1));
+            renderCurrentPageToTexture();
+        }
+    }
+}
+
 void ReaderEPUB::increaseFontSize() {
     if (!doc || !ctx) return;
     if (fz_is_document_reflowable(ctx, doc) && currentFontSize < 24.0f) {
         currentFontSize += 1.0f;
-        relayout();
-        renderCurrentPageToTexture();
+        int savedPage = currentPage;
+        std::string savedPath = filePath;
+        if (!savedPath.empty()) {
+            loadFile(savedPath, nullptr);
+            currentPage = std::max(0, std::min(savedPage, totalPages - 1));
+            renderCurrentPageToTexture();
+        }
     }
 }
 
@@ -108,8 +128,13 @@ void ReaderEPUB::decreaseFontSize() {
     if (!doc || !ctx) return;
     if (fz_is_document_reflowable(ctx, doc) && currentFontSize > 7.0f) {
         currentFontSize -= 1.0f;
-        relayout();
-        renderCurrentPageToTexture();
+        int savedPage = currentPage;
+        std::string savedPath = filePath;
+        if (!savedPath.empty()) {
+            loadFile(savedPath, nullptr);
+            currentPage = std::max(0, std::min(savedPage, totalPages - 1));
+            renderCurrentPageToTexture();
+        }
     }
 }
 
@@ -135,9 +160,9 @@ void ReaderEPUB::renderCurrentPageToTexture() {
         return;
     }
 
-    // Calcula a escala para caber na tela do Vita (920 x 450)
-    float targetW = 920.0f;
-    float targetH = 450.0f;
+    // Calcula a escala para caber no formato desejado
+    float targetW = isRotated ? 500.0f : 920.0f;
+    float targetH = isRotated ? 900.0f : 450.0f;
     float scale = std::min(targetW / pageW, targetH / pageH);
     if (scale > 2.0f) scale = 2.0f;
 
@@ -153,8 +178,8 @@ void ReaderEPUB::renderCurrentPageToTexture() {
 
     fz_colorspace* cs = fz_device_rgb(ctx);
     fz_pixmap* pix = fz_new_pixmap_with_bbox(ctx, cs, ibounds, NULL, 1);
-    // Limpa o fundo com branco/papel
-    fz_clear_pixmap_with_value(ctx, pix, 250);
+    // Limpa o fundo com total transparência
+    fz_clear_pixmap(ctx, pix);
 
     fz_device* dev = fz_new_draw_device(ctx, ctm, pix);
     fz_run_page(ctx, page, dev, fz_identity, NULL);
@@ -162,7 +187,7 @@ void ReaderEPUB::renderCurrentPageToTexture() {
     fz_drop_device(ctx, dev);
     fz_drop_page(ctx, page);
 
-    // Cria textura vita2d compatível (SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ABGR ou similar)
+    // Cria textura vita2d compatível
     pageTexture = vita2d_create_empty_texture_format(renderW, renderH, SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ABGR);
     if (pageTexture) {
         unsigned char* texData = reinterpret_cast<unsigned char*>(vita2d_texture_get_datap(pageTexture));
@@ -202,36 +227,39 @@ void ReaderEPUB::prevPage() {
     }
 }
 
-void ReaderEPUB::render(vita2d_pgf* font) {
+void ReaderEPUB::render(vita2d_pgf* font, bool fullscreen) {
     // Fundo elegante para livro
     vita2d_draw_rectangle(0, 0, 960, 544, RGBA8(24, 26, 36, 255));
 
-    // Barra superior
-    vita2d_draw_rectangle(0, 0, 960, 48, UITheme::TopBar);
-    vita2d_draw_line(0, 48, 960, 48, RGBA8(42, 48, 70, 255));
-
-    if (font) {
-        std::string title = filename;
-        if (title.length() > 40) title = title.substr(0, 37) + "...";
-        vita2d_pgf_draw_text(font, 32, 32, UITheme::BadgeEPUB, 1.0f, title.c_str());
-
+    if (!fullscreen) {
         char pageInfo[64];
-        snprintf(pageInfo, sizeof(pageInfo), "%d / %d (Fonte: %.0fpt)", currentPage + 1, totalPages > 0 ? totalPages : 1, currentFontSize);
-        vita2d_pgf_draw_text(font, 720, 32, UITheme::TextSecondary, 0.85f, pageInfo);
+        snprintf(pageInfo, sizeof(pageInfo), "%d / %d (%.0fpt)", currentPage + 1, totalPages > 0 ? totalPages : 1, currentFontSize);
+        UIComponents::drawReaderTopBar(filename, pageInfo, isRotated, UITheme::BadgeEPUB);
     }
 
     // Desenha a página renderizada centralizada na tela
     if (pageTexture) {
         float texW = static_cast<float>(vita2d_texture_get_width(pageTexture));
         float texH = static_cast<float>(vita2d_texture_get_height(pageTexture));
-        float drawX = (960.0f - texW) / 2.0f;
-        float drawY = 48.0f + ((544.0f - 48.0f - 40.0f - texH) / 2.0f);
 
-        // Moldura branca/sombra sutil ao redor da folha
-        vita2d_draw_rectangle(drawX - 2.0f, drawY - 2.0f, texW + 4.0f, texH + 4.0f, RGBA8(10, 12, 18, 180));
-        vita2d_draw_texture(pageTexture, drawX, drawY);
+        if (isRotated) {
+            // Em rotação 90 graus (retrato na tela paisagem do Vita)
+            // O centro da tela do PS Vita é (480, 272)
+            float rad = 1.57079632679f; // 90 graus em radianos
+            vita2d_draw_texture_rotate(pageTexture, 480.0f, 272.0f, rad);
+        } else {
+            float drawX = (960.0f - texW) / 2.0f;
+            float topOffset = fullscreen ? 0.0f : 48.0f;
+            float bottomOffset = fullscreen ? 0.0f : 40.0f;
+            float availableH = 544.0f - topOffset - bottomOffset;
+            float drawY = topOffset + ((availableH - texH) / 2.0f);
+
+            vita2d_draw_texture(pageTexture, drawX, drawY);
+        }
     }
 
-    UIComponents::drawReaderProgressBar(currentPage, totalPages, false);
-    UIComponents::drawFooter("D-Pad Esq/Dir: Páginas | Cima/Baixo: Fonte | O: Voltar");
+    if (!fullscreen) {
+        UIComponents::drawReaderProgressBar(currentPage, totalPages, false);
+        UIComponents::drawFooter("D-Pad: Paginas | Cima/Baixo: Fonte | O: Voltar", true);
+    }
 }

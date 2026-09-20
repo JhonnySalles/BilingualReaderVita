@@ -12,13 +12,16 @@ public:
     ~ReaderEPUB();
 
     bool loadFile(const std::string& path, vita2d_pgf* font);
-    void render(vita2d_pgf* font);
+    void render(vita2d_pgf* font, bool fullscreen = false);
     void nextPage();
     void prevPage();
     void close();
 
     void increaseFontSize();
     void decreaseFontSize();
+
+    void setRotated(bool rotated);
+    bool getRotated() const { return isRotated; }
 
     int getCurrentPage() const { return currentPage; }
     int getTotalPages() const { return totalPages; }
@@ -30,6 +33,7 @@ private:
     int currentPage;
     int totalPages;
     float currentFontSize;
+    bool isRotated;
 
     fz_context* ctx;
     fz_document* doc;

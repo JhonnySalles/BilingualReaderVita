@@ -6,6 +6,7 @@
 #include <vector>
 #include <string>
 #include <algorithm>
+#include <cmath>
 
 #include "ui_components.h"
 #include "file_browser.h"
@@ -107,11 +108,22 @@ int main(int argc, char* argv[]) {
     bool isDraggingX = false;
     int initialTouchItemIndex = -1;
 
+    // Variáveis de Gestos Touch para Leitores
+    bool readerIsTouching = false;
+    int readerTouchStartX = 0;
+    int readerTouchStartY = 0;
+    int readerLastTouchX = 0;
+    int readerLastTouchY = 0;
+    bool readerIsDragging = false;
+    bool readerIsPinching = false;
+    float readerLastPinchDist = 0.0f;
+    bool readerFullscreen = false;
+    bool readerRotated = false;
+
     // Estado do Diálogo de Exclusão (Popup)
     bool showDeleteConfirm = false;
     int itemToDeleteIndex = -1;
     bool deleteConfirmYesSelected = false;
-
 
     ReaderTXT readerTxt;
     ReaderCBZ readerCbz;
@@ -124,6 +136,7 @@ int main(int argc, char* argv[]) {
 
     auto openItem = [&](int idx) {
         if (idx >= 0 && idx < static_cast<int>(visibleItems.size())) {
+            selectedIndex = idx;
             auto& selected = visibleItems[idx];
             FileBrowser::markAsRead(selected);
             for (auto& orig : allItems) {
@@ -136,18 +149,42 @@ int main(int argc, char* argv[]) {
 
             if (selected.type == FileType::TXT) {
                 if (readerTxt.loadFile(selected.fullPath, pgf)) {
+                    readerTxt.setRotated(readerRotated, pgf);
                     currentState = AppState::READ_TXT;
                 }
-            } else if (selected.type == FileType::CBZ) {
+            } else if (FileBrowser::isMangaType(selected.type)) {
                 if (readerCbz.loadFile(selected.fullPath)) {
+                    readerCbz.setRotated(readerRotated);
                     currentState = AppState::READ_CBZ;
                 }
             } else if (selected.type == FileType::EPUB) {
                 if (readerEpub.loadFile(selected.fullPath, pgf)) {
+                    readerEpub.setRotated(readerRotated);
                     currentState = AppState::READ_EPUB;
                 }
             }
         }
+    };
+
+    auto openPrevBook = [&]() {
+        if (visibleItems.empty()) return;
+        int nextIdx = selectedIndex - 1;
+        if (nextIdx < 0) nextIdx = static_cast<int>(visibleItems.size()) - 1;
+        openItem(nextIdx);
+    };
+
+    auto openNextBook = [&]() {
+        if (visibleItems.empty()) return;
+        int nextIdx = selectedIndex + 1;
+        if (nextIdx >= static_cast<int>(visibleItems.size())) nextIdx = 0;
+        openItem(nextIdx);
+    };
+
+    auto toggleRotation = [&]() {
+        readerRotated = !readerRotated;
+        readerTxt.setRotated(readerRotated, pgf);
+        readerCbz.setRotated(readerRotated);
+        readerEpub.setRotated(readerRotated);
     };
 
     while (true) {
@@ -184,7 +221,6 @@ int main(int argc, char* argv[]) {
         bool touchDown = (touch.reportNum > 0 && oldTouchNum == 0);
         bool touchHeld = (touch.reportNum > 0 && oldTouchNum > 0);
         bool touchUp   = (touch.reportNum == 0 && oldTouchNum > 0);
-        bool touchPressed = touchDown;
         int touchX = 0;
         int touchY = 0;
         if (touch.reportNum > 0) {
@@ -193,6 +229,111 @@ int main(int argc, char* argv[]) {
             touchY = touch.report[0].y / 2;
         }
         oldTouchNum = touch.reportNum;
+
+        // Processamento de Gestos Touch unificado para os Leitores (TXT, CBZ, EPUB)
+        bool readerTapLeft = false;
+        bool readerTapRight = false;
+
+        if (currentState != AppState::MENU) {
+            if (touch.reportNum >= 2) {
+                // Multitoque: Zoom por pinça (Pinch-to-zoom)
+                float p0x = touch.report[0].x / 2.0f;
+                float p0y = touch.report[0].y / 2.0f;
+                float p1x = touch.report[1].x / 2.0f;
+                float p1y = touch.report[1].y / 2.0f;
+                float dist = std::hypot(p1x - p0x, p1y - p0y);
+                float midX = (p0x + p1x) / 2.0f;
+                float midY = (p0y + p1y) / 2.0f;
+
+                if (!readerIsPinching) {
+                    readerIsPinching = true;
+                    readerIsDragging = true;
+                    readerLastPinchDist = dist;
+                } else if (readerLastPinchDist > 5.0f && dist > 5.0f) {
+                    float factor = dist / readerLastPinchDist;
+                    if (currentState == AppState::READ_CBZ) {
+                        readerCbz.addZoom(factor, midX, midY);
+                    }
+                    readerLastPinchDist = dist;
+                }
+            } else if (touch.reportNum == 1) {
+                if (touchDown) {
+                    readerIsTouching = true;
+                    readerTouchStartX = touchX;
+                    readerTouchStartY = touchY;
+                    readerLastTouchX = touchX;
+                    readerLastTouchY = touchY;
+                    readerIsDragging = false;
+                    readerIsPinching = false;
+                    readerLastPinchDist = 0.0f;
+                } else if (touchHeld && readerIsTouching && !readerIsPinching) {
+                    int totalDx = touchX - readerTouchStartX;
+                    int totalDy = touchY - readerTouchStartY;
+                    if (std::hypot(totalDx, totalDy) > 15.0f) {
+                        readerIsDragging = true;
+                    }
+
+                    int dx = touchX - readerLastTouchX;
+                    int dy = touchY - readerLastTouchY;
+                    if (readerIsDragging && currentState == AppState::READ_CBZ) {
+                        readerCbz.addPan(static_cast<float>(dx), static_cast<float>(dy));
+                    }
+                    readerLastTouchX = touchX;
+                    readerLastTouchY = touchY;
+                }
+            } else if (touchUp && readerIsTouching) {
+                // Ao soltar, se foi apenas clique rápido (sem arraste nem pinça)
+                if (!readerIsDragging && !readerIsPinching) {
+                    // Se não estiver em tela cheia, verifica se tocou nos botões das barras
+                    bool handledBarTouch = false;
+                    if (!readerFullscreen) {
+                        // Barra Superior: Y < 48
+                        if (readerTouchStartY < 48) {
+                            // Botão de rotação (X: 840..940)
+                            if (readerTouchStartX >= 840 && readerTouchStartX <= 940) {
+                                toggleRotation();
+                                handledBarTouch = true;
+                            }
+                        }
+                        // Barra Inferior (Footer): Y >= 504
+                        else if (readerTouchStartY >= 504) {
+                            // Botão [L] Livro Ant (X: 680..790)
+                            if (readerTouchStartX >= 680 && readerTouchStartX <= 790) {
+                                openPrevBook();
+                                handledBarTouch = true;
+                            }
+                            // Botão [R] Prox Livro (X: 810..920)
+                            else if (readerTouchStartX >= 810 && readerTouchStartX <= 920) {
+                                openNextBook();
+                                handledBarTouch = true;
+                            }
+                        }
+                    }
+
+                    if (!handledBarTouch) {
+                        // Se não estiver em fullscreen, ignora toques nas bordas das barras (top 48px e bottom 40px)
+                        bool canTurnOrToggle = readerFullscreen || (readerTouchStartY >= 48 && readerTouchStartY < 504);
+                        if (canTurnOrToggle) {
+                            // Tela do PS Vita: 960x544
+                            // 20% esquerda: X < 192 (960 * 0.20) -> Página Anterior
+                            // 20% direita: X > 768 (960 * 0.80) -> Próxima Página
+                            // 60% centro: 192 <= X <= 768 -> Alterna Tela Cheia
+                            if (readerTouchStartX < 192) {
+                                readerTapLeft = true;
+                            } else if (readerTouchStartX > 768) {
+                                readerTapRight = true;
+                            } else {
+                                readerFullscreen = !readerFullscreen;
+                            }
+                        }
+                    }
+                }
+                readerIsTouching = false;
+                readerIsDragging = false;
+                readerIsPinching = false;
+                readerLastPinchDist = 0.0f;
+            }
+        }
 
         if (currentState == AppState::MENU) {
             const int gridCols = 3;
@@ -666,11 +807,17 @@ int main(int argc, char* argv[]) {
 
 
         } else if (currentState == AppState::READ_TXT) {
-            if ((pressed & SCE_CTRL_RIGHT) || (pressed & SCE_CTRL_RTRIGGER) || (touchPressed && touchX > 640)) {
-                readerTxt.nextPage();
-            }
-            if ((pressed & SCE_CTRL_LEFT) || (pressed & SCE_CTRL_LTRIGGER) || (touchPressed && touchX < 320)) {
-                readerTxt.prevPage();
+            if (pressed & SCE_CTRL_RTRIGGER) {
+                openNextBook();
+            } else if (pressed & SCE_CTRL_LTRIGGER) {
+                openPrevBook();
+            } else {
+                if ((pressed & SCE_CTRL_RIGHT) || readerTapRight) {
+                    readerTxt.nextPage();
+                }
+                if ((pressed & SCE_CTRL_LEFT) || readerTapLeft) {
+                    readerTxt.prevPage();
+                }
             }
             if (pressed & SCE_CTRL_CIRCLE) {
                 readerTxt.close();
@@ -679,16 +826,22 @@ int main(int argc, char* argv[]) {
 
             vita2d_start_drawing();
             vita2d_clear_screen();
-            readerTxt.render(pgf);
+            readerTxt.render(pgf, readerFullscreen);
             vita2d_end_drawing();
             vita2d_swap_buffers();
 
         } else if (currentState == AppState::READ_CBZ) {
-            if ((pressed & SCE_CTRL_RIGHT) || (pressed & SCE_CTRL_RTRIGGER) || (touchPressed && touchX > 640)) {
-                readerCbz.nextPage();
-            }
-            if ((pressed & SCE_CTRL_LEFT) || (pressed & SCE_CTRL_LTRIGGER) || (touchPressed && touchX < 320)) {
-                readerCbz.prevPage();
+            if (pressed & SCE_CTRL_RTRIGGER) {
+                openNextBook();
+            } else if (pressed & SCE_CTRL_LTRIGGER) {
+                openPrevBook();
+            } else {
+                if ((pressed & SCE_CTRL_RIGHT) || readerTapRight) {
+                    readerCbz.nextPage();
+                }
+                if ((pressed & SCE_CTRL_LEFT) || readerTapLeft) {
+                    readerCbz.prevPage();
+                }
             }
             if (pressed & SCE_CTRL_CIRCLE) {
                 readerCbz.close();
@@ -697,16 +850,22 @@ int main(int argc, char* argv[]) {
 
             vita2d_start_drawing();
             vita2d_clear_screen();
-            readerCbz.render(pgf);
+            readerCbz.render(pgf, readerFullscreen);
             vita2d_end_drawing();
             vita2d_swap_buffers();
 
         } else if (currentState == AppState::READ_EPUB) {
-            if ((pressed & SCE_CTRL_RIGHT) || (pressed & SCE_CTRL_RTRIGGER) || (touchPressed && touchX > 640)) {
-                readerEpub.nextPage();
-            }
-            if ((pressed & SCE_CTRL_LEFT) || (pressed & SCE_CTRL_LTRIGGER) || (touchPressed && touchX < 320)) {
-                readerEpub.prevPage();
+            if (pressed & SCE_CTRL_RTRIGGER) {
+                openNextBook();
+            } else if (pressed & SCE_CTRL_LTRIGGER) {
+                openPrevBook();
+            } else {
+                if ((pressed & SCE_CTRL_RIGHT) || readerTapRight) {
+                    readerEpub.nextPage();
+                }
+                if ((pressed & SCE_CTRL_LEFT) || readerTapLeft) {
+                    readerEpub.prevPage();
+                }
             }
             if (pressed & SCE_CTRL_UP) {
                 readerEpub.increaseFontSize();
@@ -721,7 +880,7 @@ int main(int argc, char* argv[]) {
 
             vita2d_start_drawing();
             vita2d_clear_screen();
-            readerEpub.render(pgf);
+            readerEpub.render(pgf, readerFullscreen);
             vita2d_end_drawing();
             vita2d_swap_buffers();
         }

@@ -4,7 +4,7 @@
 #include <sstream>
 #include <cstdio>
 
-ReaderTXT::ReaderTXT() : currentPage(0), totalPages(0) {}
+ReaderTXT::ReaderTXT() : currentPage(0), totalPages(0), isRotated(false) {}
 
 ReaderTXT::~ReaderTXT() {
     close();
@@ -12,6 +12,7 @@ ReaderTXT::~ReaderTXT() {
 
 void ReaderTXT::close() {
     pages.clear();
+    rawContent.clear();
     currentPage = 0;
     totalPages = 0;
     filename = "";
@@ -30,16 +31,33 @@ bool ReaderTXT::loadFile(const std::string& path, vita2d_pgf* font) {
 
     std::stringstream buffer;
     buffer << file.rdbuf();
-    std::string text = buffer.str();
+    rawContent = buffer.str();
     file.close();
 
-    paginateText(text, font);
+    paginateText(rawContent, font);
     return !pages.empty();
 }
 
+void ReaderTXT::setRotated(bool rotated, vita2d_pgf* font) {
+    if (isRotated != rotated) {
+        isRotated = rotated;
+        int savedPage = currentPage;
+        paginateText(rawContent, font);
+        currentPage = std::max(0, std::min(savedPage, totalPages - 1));
+    }
+}
+
 void ReaderTXT::paginateText(const std::string& fullText, vita2d_pgf* font) {
-    const int maxLinesPerPage = 16;
-    const int maxCharsPerLine = 70; // Estimativa segura para tela do Vita com PGF em escala 1.0f
+    pages.clear();
+    if (fullText.empty()) {
+        totalPages = 0;
+        currentPage = 0;
+        return;
+    }
+
+    // Modo retrato: mais linhas, menos caracteres por linha
+    const int maxLinesPerPage = isRotated ? 32 : 16;
+    const int maxCharsPerLine = isRotated ? 38 : 70;
 
     std::istringstream stream(fullText);
     std::string line;
@@ -96,33 +114,32 @@ void ReaderTXT::prevPage() {
     }
 }
 
-void ReaderTXT::render(vita2d_pgf* font) {
+void ReaderTXT::render(vita2d_pgf* font, bool fullscreen) {
     // Fundo do leitor
     vita2d_draw_rectangle(0, 0, 960, 544, RGBA8(18, 20, 29, 255));
 
-    // Cabeçalho de Leitura
-    vita2d_draw_rectangle(0, 0, 960, 48, UITheme::TopBar);
-    vita2d_draw_line(0, 48, 960, 48, RGBA8(42, 48, 70, 255));
+    if (!fullscreen) {
+        char pageInfo[64];
+        snprintf(pageInfo, sizeof(pageInfo), "Pag %d / %d", currentPage + 1, totalPages > 0 ? totalPages : 1);
+        UIComponents::drawReaderTopBar(filename, pageInfo, isRotated, UITheme::BadgeTXT);
+    }
 
     if (font) {
-        vita2d_pgf_draw_text(font, 32, 32, UITheme::Primary, 1.0f, filename.c_str());
-
-        char pageInfo[64];
-        snprintf(pageInfo, sizeof(pageInfo), "Pág %d / %d", currentPage + 1, totalPages > 0 ? totalPages : 1);
-        vita2d_pgf_draw_text(font, 820, 32, UITheme::TextSecondary, 0.9f, pageInfo);
-
         // Renderiza o corpo do texto
         if (!pages.empty() && currentPage < (int)pages.size()) {
             std::istringstream stream(pages[currentPage]);
             std::string line;
-            int yPos = 84;
+            int yPos = fullscreen ? 36 : 84;
+            int xPos = isRotated ? 240 : 48;
             while (std::getline(stream, line)) {
-                vita2d_pgf_draw_text(font, 48, yPos, UITheme::TextPrimary, 0.95f, line.c_str());
+                vita2d_pgf_draw_text(font, (float)xPos, (float)yPos, UITheme::TextPrimary, 0.95f, line.c_str());
                 yPos += 24;
             }
         }
     }
 
-    // Rodapé
-    UIComponents::drawFooter("D-Pad Esq/Dir: Navegar | O: Voltar");
+    if (!fullscreen) {
+        UIComponents::drawReaderProgressBar(currentPage, totalPages, false);
+        UIComponents::drawFooter("D-Pad: Paginas | O: Voltar", true);
+    }
 }

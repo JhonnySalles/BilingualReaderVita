@@ -328,12 +328,62 @@ void UIComponents::drawLibraryScrollBar(float currentOffset, int totalItems, int
 }
 
 
-void UIComponents::drawFooter(const std::string& controlsHint) {
+void UIComponents::drawReaderTopBar(const std::string& title, const std::string& extraInfo, bool isRotated, unsigned int badgeColor) {
+    vita2d_draw_rectangle(0, 0, 960, 48, UITheme::TopBar);
+    vita2d_draw_line(0, 48, 960, 48, RGBA8(42, 48, 70, 255));
+
+    if (pgf) {
+        std::string displayTitle = title;
+        if (displayTitle.length() > 34) {
+            displayTitle = displayTitle.substr(0, 31) + "...";
+        }
+        vita2d_pgf_draw_text(pgf, 24.0f, 32.0f, badgeColor, 1.0f, displayTitle.c_str());
+
+        if (!extraInfo.empty()) {
+            vita2d_pgf_draw_text(pgf, 580.0f, 32.0f, UITheme::TextSecondary, 0.85f, extraInfo.c_str());
+        }
+    }
+
+    // Botão de Rotação de Tela no canto superior direito (X: 840 -> 940, Y: 8 -> 40)
+    float rotBtnX = 840.0f;
+    float rotBtnY = 8.0f;
+    float rotBtnW = 100.0f;
+    float rotBtnH = 32.0f;
+    unsigned int rotBg = isRotated ? UITheme::Primary : UITheme::Surface;
+    drawRoundedBox(rotBtnX, rotBtnY, rotBtnW, rotBtnH, 6.0f, rotBg);
+
+    if (pgf) {
+        const char* rotText = isRotated ? "[*] 90 Deg" : "[ ] Normal";
+        vita2d_pgf_draw_text(pgf, rotBtnX + 10.0f, rotBtnY + 22.0f, UITheme::TextPrimary, 0.80f, rotText);
+    }
+}
+
+void UIComponents::drawFooter(const std::string& controlsHint, bool showBookNav) {
     vita2d_draw_rectangle(0, 504, 960, 40, UITheme::TopBar);
     vita2d_draw_line(0, 504, 960, 504, RGBA8(42, 48, 70, 255));
 
     if (pgf) {
         vita2d_pgf_draw_text(pgf, 24, 528, UITheme::TextSecondary, 0.85f, controlsHint.c_str());
+    }
+
+    if (showBookNav) {
+        // Botão [L] Livro Ant (X: 680..790, Y: 508..538)
+        float btnAntX = 680.0f;
+        float btnAntY = 508.0f;
+        float btnW = 110.0f;
+        float btnH = 32.0f;
+        drawRoundedBox(btnAntX, btnAntY, btnW, btnH, 6.0f, UITheme::Surface);
+        if (pgf) {
+            vita2d_pgf_draw_text(pgf, btnAntX + 10.0f, btnAntY + 22.0f, UITheme::TextPrimary, 0.78f, "[L] Livro Ant");
+        }
+
+        // Botão [R] Prox Livro (X: 810..920, Y: 508..538)
+        float btnProxX = 810.0f;
+        float btnProxY = 508.0f;
+        drawRoundedBox(btnProxX, btnProxY, btnW, btnH, 6.0f, UITheme::Surface);
+        if (pgf) {
+            vita2d_pgf_draw_text(pgf, btnProxX + 10.0f, btnProxY + 22.0f, UITheme::TextPrimary, 0.78f, "[R] Prox Livro");
+        }
     }
 }
 
