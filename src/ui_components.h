@@ -35,9 +35,10 @@ class UIComponents {
 public:
     static void init(vita2d_pgf* defaultPgf);
     static void shutdown();
+    static void setRotated(bool rotated);
     static void drawRoundedBox(float x, float y, float w, float h, float radius, unsigned int color);
     
-    // Top Bar com Campo de Pesquisa, Ícone de Ordenação, Alternância de Grid/Lista e Botão Refresh
+    // Top Bar com Campo de Pesquisa, Ícone de Ordenação, Alternância de Grid/Lista, Botão Configurações e Refresh
     static void drawTopBar(
         const std::string& searchQuery,
         bool isSearchActive,
@@ -46,8 +47,12 @@ public:
         bool isSearchSelected,
         bool isSortSelected,
         bool isLayoutSelected,
+        bool isSettingsSelected,
         bool isRefreshSelected
     );
+
+    // Tela de Configurações (Estilo PS Vita Nativo)
+    static void drawSettingsScreen(int selectedItemIndex, const struct AppConfig& config);
 
     // Utilitário para cálculo de transparência (Alpha Blending)
     static inline unsigned int applyAlpha(unsigned int color, float alpha) {

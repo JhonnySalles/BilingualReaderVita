@@ -143,6 +143,8 @@ bool ParseTar::extractCover(const std::string& outPath) {
     return extractPage(0, outPath);
 }
 
+#include "../image_loader.h"
+
 vita2d_texture* ParseTar::loadPageTexture(size_t index) {
     if (index >= m_pageNames.size() || !m_file) return nullptr;
 
@@ -158,12 +160,5 @@ vita2d_texture* ParseTar::loadPageTexture(size_t index) {
         return nullptr;
     }
 
-    std::string ext = FileUtils::getExtension(pageName);
-    if (ext == "png") {
-        return vita2d_load_PNG_buffer(data.data());
-    } else if (ext == "jpg" || ext == "jpeg") {
-        return vita2d_load_JPEG_buffer(data.data(), data.size());
-    }
-
-    return nullptr;
+    return ImageLoader::loadTextureFromBuffer(data.data(), data.size());
 }

@@ -1,8 +1,14 @@
 #include "ui_components.h"
+#include "config_manager.h"
 #include <algorithm>
+#include <cstdio>
 
 vita2d_pgf* UIComponents::pgf = nullptr;
 vita2d_texture* UIComponents::appIcon = nullptr;
+
+static bool isRotatedUi = false;
+static float screenW = screenW;
+static float screenH = screenH;
 
 void UIComponents::init(vita2d_pgf* defaultPgf) {
     pgf = defaultPgf;
@@ -21,6 +27,12 @@ void UIComponents::shutdown() {
         vita2d_free_texture(appIcon);
         appIcon = nullptr;
     }
+}
+
+void UIComponents::setRotated(bool rotated) {
+    isRotatedUi = rotated;
+    screenW = rotated ? screenH : screenW;
+    screenH = rotated ? screenW : screenH;
 }
 
 void UIComponents::drawRoundedBox(float x, float y, float w, float h, float radius, unsigned int color) {
@@ -69,11 +81,12 @@ void UIComponents::drawTopBar(
     bool isSearchSelected,
     bool isSortSelected,
     bool isLayoutSelected,
+    bool isSettingsSelected,
     bool isRefreshSelected
 ) {
     // Fundo da Top Bar
-    vita2d_draw_rectangle(0, 0, 960, 68, UITheme::TopBar);
-    vita2d_draw_line(0, 68, 960, 68, RGBA8(42, 48, 70, 255));
+    vita2d_draw_rectangle(0, 0, screenW, 68, UITheme::TopBar);
+    vita2d_draw_line(0, 68, screenW, 68, RGBA8(42, 48, 70, 255));
 
     // Logo / Ícone e Nome do App à esquerda
     if (appIcon) {
@@ -92,9 +105,9 @@ void UIComponents::drawTopBar(
     }
 
     // Campo de Busca
-    float searchX = 270.0f;
+    float searchX = isRotatedUi ? 170.0f : 250.0f;
     float searchY = 14.0f;
-    float searchW = 290.0f;
+    float searchW = isRotatedUi ? 120.0f : 240.0f;
     float searchH = 40.0f;
 
     unsigned int searchBg = isSearchActive ? UITheme::SearchBarActive : (isSearchSelected ? UITheme::SurfaceActive : UITheme::SearchBarBg);
@@ -106,20 +119,20 @@ void UIComponents::drawTopBar(
 
     if (pgf) {
         if (searchQuery.empty()) {
-            vita2d_pgf_draw_text(pgf, searchX + 16.0f, searchY + 26.0f, UITheme::TextSecondary, 0.85f, "Buscar... [X]");
+            vita2d_pgf_draw_text(pgf, searchX + 16.0f, searchY + 26.0f, UITheme::TextSecondary, 0.85f, isRotatedUi ? "Buscar..." : "Buscar... [X]");
         } else {
             std::string displayText = searchQuery;
-            if (displayText.length() > 20) {
-                displayText = displayText.substr(0, 17) + "...";
+            if (isRotatedUi && displayText.length() > 8) { displayText = displayText.substr(0, 5) + "..."; } else if (!isRotatedUi && displayText.length() > 16) {
+                displayText = displayText.substr(0, 13) + "...";
             }
             vita2d_pgf_draw_text(pgf, searchX + 16.0f, searchY + 26.0f, UITheme::TextPrimary, 0.85f, displayText.c_str());
         }
     }
 
     // Botão de Ordenação
-    float sortX = 572.0f;
+    float sortX = isRotatedUi ? 295.0f : 500.0f;
     float sortY = 14.0f;
-    float sortW = 166.0f;
+    float sortW = isRotatedUi ? 95.0f : 150.0f;
     float sortH = 40.0f;
 
     unsigned int sortBg = isSortSelected ? UITheme::SurfaceActive : UITheme::Surface;
@@ -130,14 +143,14 @@ void UIComponents::drawTopBar(
     }
 
     if (pgf) {
-        std::string sortLabel = std::string("Ord: ") + FileBrowser::getSortModeName(currentSort);
+        std::string sortLabel = isRotatedUi ? "Ord" : std::string("Ord: ") + FileBrowser::getSortModeName(currentSort);
         vita2d_pgf_draw_text(pgf, sortX + 12.0f, sortY + 26.0f, UITheme::TextPrimary, 0.82f, sortLabel.c_str());
     }
 
     // Botão de Alternância Lista / Grade
-    float layoutX = 748.0f;
+    float layoutX = isRotatedUi ? 395.0f : 660.0f;
     float layoutY = 14.0f;
-    float layoutW = 114.0f;
+    float layoutW = isRotatedUi ? 45.0f : 110.0f;
     float layoutH = 40.0f;
 
     unsigned int layoutBg = isLayoutSelected ? UITheme::SurfaceActive : UITheme::Surface;
@@ -148,14 +161,32 @@ void UIComponents::drawTopBar(
     }
 
     if (pgf) {
-        const char* modeText = isGridView ? "[ Grade ]" : "[ Lista ]";
-        vita2d_pgf_draw_text(pgf, layoutX + 15.0f, layoutY + 26.0f, UITheme::TextPrimary, 0.85f, modeText);
+        const char* modeText = isRotatedUi ? (isGridView ? "[G]" : "[L]") : (isGridView ? "[ Grade ]" : "[ Lista ]");
+        vita2d_pgf_draw_text(pgf, layoutX + 14.0f, layoutY + 26.0f, UITheme::TextPrimary, 0.85f, modeText);
+    }
+
+    // Botão de Configurações
+    float cfgX = isRotatedUi ? 445.0f : 780.0f;
+    float cfgY = 14.0f;
+    float cfgW = isRotatedUi ? 45.0f : 90.0f;
+    float cfgH = 40.0f;
+
+    unsigned int cfgBg = isSettingsSelected ? UITheme::SurfaceActive : UITheme::Surface;
+    drawRoundedBox(cfgX, cfgY, cfgW, cfgH, 8.0f, cfgBg);
+
+    if (isSettingsSelected) {
+        vita2d_draw_rectangle(cfgX, cfgY + 4.0f, 3.0f, cfgH - 8.0f, UITheme::Primary);
+    }
+
+    if (pgf) {
+        const char* cfgText = isRotatedUi ? "[C]" : "[ Config ]";
+        vita2d_pgf_draw_text(pgf, cfgX + 10.0f, cfgY + 26.0f, UITheme::TextPrimary, 0.85f, cfgText);
     }
 
     // Botão de Refresh
-    float refreshX = 872.0f;
+    float refreshX = isRotatedUi ? 495.0f : 880.0f;
     float refreshY = 14.0f;
-    float refreshW = 60.0f;
+    float refreshW = isRotatedUi ? 40.0f : 55.0f;
     float refreshH = 40.0f;
 
     unsigned int refreshBg = isRefreshSelected ? UITheme::SurfaceActive : UITheme::Surface;
@@ -166,18 +197,18 @@ void UIComponents::drawTopBar(
     }
 
     if (pgf) {
-        vita2d_pgf_draw_text(pgf, refreshX + 17.0f, refreshY + 26.0f, UITheme::TextPrimary, 0.90f, "[R]");
+        vita2d_pgf_draw_text(pgf, refreshX + 14.0f, refreshY + 26.0f, UITheme::TextPrimary, 0.90f, "[R]");
     }
 }
 
 void UIComponents::drawConfirmDialog(const std::string& title, const std::string& message, bool isYesSelected) {
     // Backdrop escuro semitransparente
-    vita2d_draw_rectangle(0, 0, 960, 544, RGBA8(0, 0, 0, 190));
+    vita2d_draw_rectangle(0, 0, screenW, screenH, RGBA8(0, 0, 0, 190));
 
     float dlgW = 480.0f;
     float dlgH = 210.0f;
-    float dlgX = (960.0f - dlgW) / 2.0f;
-    float dlgY = (544.0f - dlgH) / 2.0f;
+    float dlgX = (screenW - dlgW) / 2.0f;
+    float dlgY = (screenH - dlgH) / 2.0f;
 
     // Caixa do diálogo
     drawRoundedBox(dlgX, dlgY, dlgW, dlgH, 12.0f, UITheme::Surface);
@@ -225,12 +256,12 @@ void UIComponents::drawConfirmDialog(const std::string& title, const std::string
 
 void UIComponents::drawProgressPopup(const std::string& title, const std::string& message, float progress) {
     // Backdrop escuro semitransparente
-    vita2d_draw_rectangle(0, 0, 960, 544, RGBA8(0, 0, 0, 190));
+    vita2d_draw_rectangle(0, 0, screenW, screenH, RGBA8(0, 0, 0, 190));
 
     float dlgW = 480.0f;
     float dlgH = 190.0f;
-    float dlgX = (960.0f - dlgW) / 2.0f;
-    float dlgY = (544.0f - dlgH) / 2.0f;
+    float dlgX = (screenW - dlgW) / 2.0f;
+    float dlgY = (screenH - dlgH) / 2.0f;
 
     // Caixa do diálogo
     drawRoundedBox(dlgX, dlgY, dlgW, dlgH, 12.0f, UITheme::Surface);
@@ -356,7 +387,7 @@ void UIComponents::drawLibraryScrollBar(float currentOffset, int totalItems, int
     if (totalItems <= visibleCapacity || totalItems <= 0) return;
     if (alpha <= 0.01f) return;
 
-    float trackX = 948.0f;
+    float trackX = screenW - 12.0f;
     float trackY = 80.0f;
     float trackH = 412.0f;
     float trackW = 5.0f;
@@ -381,8 +412,8 @@ void UIComponents::drawLibraryScrollBar(float currentOffset, int totalItems, int
 
 
 void UIComponents::drawReaderTopBar(const std::string& title, const std::string& extraInfo, bool isRotated, unsigned int badgeColor) {
-    vita2d_draw_rectangle(0, 0, 960, 48, UITheme::TopBar);
-    vita2d_draw_line(0, 48, 960, 48, RGBA8(42, 48, 70, 255));
+    vita2d_draw_rectangle(0, 0, screenW, 48, UITheme::TopBar);
+    vita2d_draw_line(0, 48, screenW, 48, RGBA8(42, 48, 70, 255));
 
     if (pgf) {
         std::string displayTitle = title;
@@ -397,7 +428,7 @@ void UIComponents::drawReaderTopBar(const std::string& title, const std::string&
     }
 
     // Botão de Rotação de Tela no canto superior direito (X: 840 -> 940, Y: 8 -> 40)
-    float rotBtnX = 840.0f;
+    float rotBtnX = isRotatedUi ? screenW - 120.0f : 840.0f;
     float rotBtnY = 8.0f;
     float rotBtnW = 100.0f;
     float rotBtnH = 32.0f;
@@ -411,8 +442,8 @@ void UIComponents::drawReaderTopBar(const std::string& title, const std::string&
 }
 
 void UIComponents::drawFooter(const std::string& controlsHint, bool showBookNav) {
-    vita2d_draw_rectangle(0, 504, 960, 40, UITheme::TopBar);
-    vita2d_draw_line(0, 504, 960, 504, RGBA8(42, 48, 70, 255));
+    vita2d_draw_rectangle(0, 504, screenW, 40, UITheme::TopBar);
+    vita2d_draw_line(0, 504, screenW, 504, RGBA8(42, 48, 70, 255));
 
     if (pgf) {
         vita2d_pgf_draw_text(pgf, 24, 528, UITheme::TextSecondary, 0.85f, controlsHint.c_str());
@@ -420,7 +451,7 @@ void UIComponents::drawFooter(const std::string& controlsHint, bool showBookNav)
 
     if (showBookNav) {
         // Botão [L] Livro Ant (X: 680..790, Y: 508..538)
-        float btnAntX = 680.0f;
+        float btnAntX = isRotatedUi ? screenW - 240.0f : 680.0f;
         float btnAntY = 508.0f;
         float btnW = 110.0f;
         float btnH = 32.0f;
@@ -430,7 +461,7 @@ void UIComponents::drawFooter(const std::string& controlsHint, bool showBookNav)
         }
 
         // Botão [R] Prox Livro (X: 810..920, Y: 508..538)
-        float btnProxX = 810.0f;
+        float btnProxX = isRotatedUi ? screenW - 120.0f : 810.0f;
         float btnProxY = 508.0f;
         drawRoundedBox(btnProxX, btnProxY, btnW, btnH, 6.0f, UITheme::Surface);
         if (pgf) {
@@ -449,11 +480,11 @@ void UIComponents::drawReaderProgressBar(int currentPage, int totalPages, bool i
     // Se o HUD estiver visível, desenha uma barra completa com informações no rodapé
     if (isHudVisible) {
         float hudHeight = 44.0f;
-        float hudY = 544.0f - hudHeight;
+        float hudY = screenH - hudHeight;
 
         // Fundo semitransparente escuro
-        vita2d_draw_rectangle(0, hudY, 960, hudHeight, UITheme::ProgressBarBg);
-        vita2d_draw_line(0, hudY, 960, hudY, RGBA8(60, 66, 92, 180));
+        vita2d_draw_rectangle(0, hudY, screenW, hudHeight, UITheme::ProgressBarBg);
+        vita2d_draw_line(0, hudY, screenW, hudY, RGBA8(60, 66, 92, 180));
 
         // Barra de progresso horizontal
         float barX = 140.0f;
@@ -481,10 +512,110 @@ void UIComponents::drawReaderProgressBar(int currentPage, int totalPages, bool i
         }
     } else {
         // Barra discreta e fina no fundo da tela
-        float barW = 960.0f * progressRatio;
-        vita2d_draw_rectangle(0, 540, 960, 4, RGBA8(0, 0, 0, 100));
+        float barW = screenW * progressRatio;
+        vita2d_draw_rectangle(0, 540, screenW, 4, RGBA8(0, 0, 0, 100));
         if (barW > 0.0f) {
             vita2d_draw_rectangle(0, 540, barW, 4, UITheme::ProgressBarFill);
         }
     }
+}
+
+void UIComponents::drawSettingsScreen(int selectedItemIndex, const AppConfig& config) {
+    // Top Bar de Configurações
+    vita2d_draw_rectangle(0, 0, screenW, 68, UITheme::TopBar);
+    vita2d_draw_line(0, 68, screenW, 68, RGBA8(42, 48, 70, 255));
+
+    if (pgf) {
+        vita2d_pgf_draw_text(pgf, 32.0f, 44.0f, UITheme::TextPrimary, 1.2f, "Configurações");
+    }
+
+    float startY = 88.0f;
+    float boxW = screenW - 64.0f; // 896px
+    float rowH = 46.0f;
+
+    // --- SEÇÃO 1: BIBLIOTECA ---
+    if (pgf) {
+        vita2d_pgf_draw_text(pgf, 40.0f, startY + 16.0f, UITheme::Secondary, 0.9f, "BIBLIOTECA");
+    }
+    float sec1Y = startY + 26.0f;
+    float sec1H = rowH * 2.0f; // 2 itens: Modo de Exibição, Ordenação Padrão
+    drawRoundedBox(32.0f, sec1Y, boxW, sec1H, 10.0f, UITheme::Surface);
+
+    // Linha divisória interna da seção 1
+    vita2d_draw_line(36.0f, sec1Y + rowH, 32.0f + boxW - 4.0f, sec1Y + rowH, RGBA8(42, 48, 70, 255));
+
+    // Item 0: Modo de Exibição (Lista / Grade)
+    if (selectedItemIndex == 0) {
+        drawRoundedBox(34.0f, sec1Y + 2.0f, boxW - 4.0f, rowH - 4.0f, 8.0f, UITheme::SurfaceActive);
+        vita2d_draw_rectangle(34.0f, sec1Y + 6.0f, 4.0f, rowH - 12.0f, UITheme::Primary);
+    }
+    if (pgf) {
+        vita2d_pgf_draw_text(pgf, 52.0f, sec1Y + 30.0f, UITheme::TextPrimary, 0.95f, "Modo de Exibição Padrão");
+        const char* viewModeStr = config.isGridView ? "< Grade >" : "< Lista >";
+        vita2d_pgf_draw_text(pgf, boxW - 140.0f, sec1Y + 30.0f, UITheme::Primary, 0.95f, viewModeStr);
+    }
+
+    // Item 1: Ordenação Padrão
+    float row1Y = sec1Y + rowH;
+    if (selectedItemIndex == 1) {
+        drawRoundedBox(34.0f, row1Y + 2.0f, boxW - 4.0f, rowH - 4.0f, 8.0f, UITheme::SurfaceActive);
+        vita2d_draw_rectangle(34.0f, row1Y + 6.0f, 4.0f, rowH - 12.0f, UITheme::Primary);
+    }
+    if (pgf) {
+        vita2d_pgf_draw_text(pgf, 52.0f, row1Y + 30.0f, UITheme::TextPrimary, 0.95f, "Ordenação Padrão");
+        std::string sortStr = std::string("< ") + FileBrowser::getSortModeName(config.sortMode) + " >";
+        vita2d_pgf_draw_text(pgf, boxW - 180.0f, row1Y + 30.0f, UITheme::Primary, 0.95f, sortStr.c_str());
+    }
+
+    // --- SEÇÃO 2: LEITOR & VISUALIZAÇÃO ---
+    float sec2StartY = sec1Y + sec1H + 24.0f;
+    if (pgf) {
+        vita2d_pgf_draw_text(pgf, 40.0f, sec2StartY + 16.0f, UITheme::Secondary, 0.9f, "LEITOR & VISUALIZAÇÃO");
+    }
+    float sec2Y = sec2StartY + 26.0f;
+    float sec2H = rowH * 3.0f; // 3 itens: Orientação, Números de Página, Tamanho da Fonte EPUB
+    drawRoundedBox(32.0f, sec2Y, boxW, sec2H, 10.0f, UITheme::Surface);
+
+    // Linhas divisórias internas da seção 2
+    vita2d_draw_line(36.0f, sec2Y + rowH, 32.0f + boxW - 4.0f, sec2Y + rowH, RGBA8(42, 48, 70, 255));
+    vita2d_draw_line(36.0f, sec2Y + rowH * 2.0f, 32.0f + boxW - 4.0f, sec2Y + rowH * 2.0f, RGBA8(42, 48, 70, 255));
+
+    // Item 2: Orientação do Leitor
+    if (selectedItemIndex == 2) {
+        drawRoundedBox(34.0f, sec2Y + 2.0f, boxW - 4.0f, rowH - 4.0f, 8.0f, UITheme::SurfaceActive);
+        vita2d_draw_rectangle(34.0f, sec2Y + 6.0f, 4.0f, rowH - 12.0f, UITheme::Primary);
+    }
+    if (pgf) {
+        vita2d_pgf_draw_text(pgf, 52.0f, sec2Y + 30.0f, UITheme::TextPrimary, 0.95f, "Orientação Inicial do Leitor");
+        const char* orientStr = config.readerRotated ? "< Vertical (Girar 90°) >" : "< Horizontal (Padrão) >";
+        vita2d_pgf_draw_text(pgf, boxW - 250.0f, sec2Y + 30.0f, UITheme::Primary, 0.95f, orientStr);
+    }
+
+    // Item 3: Exibir Número de Páginas
+    float row3Y = sec2Y + rowH;
+    if (selectedItemIndex == 3) {
+        drawRoundedBox(34.0f, row3Y + 2.0f, boxW - 4.0f, rowH - 4.0f, 8.0f, UITheme::SurfaceActive);
+        vita2d_draw_rectangle(34.0f, row3Y + 6.0f, 4.0f, rowH - 12.0f, UITheme::Primary);
+    }
+    if (pgf) {
+        vita2d_pgf_draw_text(pgf, 52.0f, row3Y + 30.0f, UITheme::TextPrimary, 0.95f, "Exibir Barra de Progresso e Páginas");
+        const char* pagesStr = config.showPageNumbers ? "< Sim >" : "< Não >";
+        vita2d_pgf_draw_text(pgf, boxW - 140.0f, row3Y + 30.0f, UITheme::Primary, 0.95f, pagesStr);
+    }
+
+    // Item 4: Tamanho da Fonte Padrão (EPUB/TXT)
+    float row4Y = sec2Y + rowH * 2.0f;
+    if (selectedItemIndex == 4) {
+        drawRoundedBox(34.0f, row4Y + 2.0f, boxW - 4.0f, rowH - 4.0f, 8.0f, UITheme::SurfaceActive);
+        vita2d_draw_rectangle(34.0f, row4Y + 6.0f, 4.0f, rowH - 12.0f, UITheme::Primary);
+    }
+    if (pgf) {
+        vita2d_pgf_draw_text(pgf, 52.0f, row4Y + 30.0f, UITheme::TextPrimary, 0.95f, "Tamanho de Fonte Padrão (EPUB)");
+        char fontStr[32];
+        snprintf(fontStr, sizeof(fontStr), "< %d px >", config.epubFontSize);
+        vita2d_pgf_draw_text(pgf, boxW - 140.0f, row4Y + 30.0f, UITheme::Primary, 0.95f, fontStr);
+    }
+
+    // Rodapé de Navegação
+    drawFooter("D-Pad Cima/Baixo: Selecionar | D-Pad Esq/Dir: Alterar | O: Voltar e Salvar");
 }

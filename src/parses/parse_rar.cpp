@@ -91,11 +91,13 @@ bool ParseRar::extractAllWithProgress() {
         bool isImage = FileUtils::isImageFile(headerData.FileName);
         
         if (isImage) {
-            std::string outName = headerData.FileName;
-            std::replace(outName.begin(), outName.end(), '/', '_');
-            std::replace(outName.begin(), outName.end(), '\\', '_');
+            std::string ext = FileUtils::getExtension(headerData.FileName);
+            if (ext.empty()) ext = "jpg";
             
-            std::string outPath = m_cacheDir + outName;
+            char formattedName[64];
+            snprintf(formattedName, sizeof(formattedName), "page_%05d.%s", extracted + 1, ext.c_str());
+            
+            std::string outPath = m_cacheDir + formattedName;
             
             int res = RARProcessFile(hArc, RAR_EXTRACT, NULL, (char*)outPath.c_str());
             if (res == ERAR_SUCCESS) {
@@ -139,17 +141,11 @@ bool ParseRar::extractCover(const std::string& outPath) {
     return extractPage(0, outPath);
 }
 
+#include "../image_loader.h"
+
 vita2d_texture* ParseRar::loadPageTexture(size_t index) {
     if (index >= m_pageNames.size()) return nullptr;
     
     std::string path = m_pageNames[index];
-    std::string ext = FileUtils::getExtension(path);
-    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-
-    if (ext == "png") {
-        return vita2d_load_PNG_file(path.c_str());
-    } else if (ext == "jpg" || ext == "jpeg") {
-        return vita2d_load_JPEG_file(path.c_str());
-    }
-    return nullptr;
+    return ImageLoader::loadTextureFromFile(path);
 }

@@ -29,6 +29,7 @@ ReaderCBZ::~ReaderCBZ() {
 
 void ReaderCBZ::freeTexture() {
     if (currentTexture) {
+        vita2d_wait_rendering_done();
         vita2d_free_texture(currentTexture);
         currentTexture = nullptr;
     }
@@ -248,35 +249,30 @@ void ReaderCBZ::prevPage() {
 
 void ReaderCBZ::render(vita2d_pgf* font, bool fullscreen) {
     // Fundo escuro focado para leitura de mangá
-    vita2d_draw_rectangle(0, 0, 960, 544, RGBA8(10, 10, 12, 255));
+    float screenW = isRotated ? 544.0f : 960.0f; float screenH = isRotated ? 960.0f : 544.0f;
+    vita2d_draw_rectangle(0, 0, screenW, screenH, RGBA8(10, 10, 12, 255));
 
     if (currentTexture) {
         unsigned int texW = vita2d_texture_get_width(currentTexture);
         unsigned int texH = vita2d_texture_get_height(currentTexture);
 
-        if (isRotated) {
-            float rad = 1.57079632679f; // 90 graus
-            float centerX = 480.0f + panX;
-            float centerY = 272.0f + panY;
-            vita2d_draw_texture_rotate(currentTexture, centerX, centerY, rad);
-        } else {
+        
             float renderW = static_cast<float>(texW);
             float renderH = static_cast<float>(texH);
             float topOffset = fullscreen ? 0.0f : 48.0f;
             float bottomOffset = fullscreen ? 0.0f : 40.0f;
-            float availableH = 544.0f - topOffset - bottomOffset;
+            float availableH = screenH - topOffset - bottomOffset;
 
-            float posX = ((960.0f - renderW) / 2.0f) + panX;
+            float posX = ((screenW - renderW) / 2.0f) + panX;
             float posY = topOffset + ((availableH - renderH) / 2.0f) + panY;
             vita2d_draw_texture(currentTexture, posX, posY);
-        }
     } else {
         // Fallback visual com indicador moderno
-        UIComponents::drawRoundedBox(330, 220, 300, 100, 12.0f, UITheme::Surface);
+        UIComponents::drawRoundedBox(screenW/2.0f - 150.0f, screenH/2.0f - 50.0f, 300, 100, 12.0f, UITheme::Surface);
         if (font) {
             std::string label = "[ Manga / " + typeString + " ]";
-            vita2d_pgf_draw_text(font, 360, 260, UITheme::TextPrimary, 1.0f, label.c_str());
-            vita2d_pgf_draw_text(font, 380, 290, UITheme::TextSecondary, 0.85f, "Carregando pagina...");
+            vita2d_pgf_draw_text(font, screenW/2.0f - 120.0f, screenH/2.0f - 10.0f, UITheme::TextPrimary, 1.0f, label.c_str());
+            vita2d_pgf_draw_text(font, screenW/2.0f - 100.0f, screenH/2.0f + 20.0f, UITheme::TextSecondary, 0.85f, "Carregando pagina...");
         }
     }
 

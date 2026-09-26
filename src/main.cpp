@@ -9,6 +9,7 @@
 #include <cmath>
 
 #include "ui_components.h"
+#include "config_manager.h"
 #include "file_browser.h"
 #include "reader_txt.h"
 #include "reader_cbz.h"
@@ -16,6 +17,7 @@
 
 enum class AppState {
     MENU,
+    SETTINGS,
     READ_TXT,
     READ_CBZ,
     READ_EPUB
@@ -25,6 +27,7 @@ enum class FocusArea {
     SEARCH,
     SORT,
     LAYOUT,
+    SETTINGS,
     REFRESH,
     CONTENT
 };
@@ -77,6 +80,10 @@ int main(int argc, char* argv[]) {
     vita2d_init();
     vita2d_set_clear_color(UITheme::Background);
 
+    // Carrega configurações salvas
+    ConfigManager::getInstance().load();
+    AppConfig& appConfig = ConfigManager::getInstance().getConfig();
+
     // Habilita amostragem do Touch Frontal
     sceTouchSetSamplingState(SCE_TOUCH_PORT_FRONT, SCE_TOUCH_SAMPLING_STATE_START);
 
@@ -85,12 +92,14 @@ int main(int argc, char* argv[]) {
 
     AppState currentState = AppState::MENU;
     FocusArea currentFocus = FocusArea::CONTENT;
+    int settingsSelectedIndex = 0;
 
     std::vector<LibraryItem> allItems = FileBrowser::scanLibrary();
-    SortMode currentSort = SortMode::NAME;
-    bool isGridView = false;
+    SortMode currentSort = appConfig.sortMode;
+    bool isGridView = appConfig.isGridView;
     std::string searchQuery = "";
 
+    FileBrowser::sortItems(allItems, currentSort);
     std::vector<LibraryItem> visibleItems = FileBrowser::filterItems(allItems, searchQuery);
 
     int selectedIndex = 0;
@@ -118,7 +127,7 @@ int main(int argc, char* argv[]) {
     bool readerIsPinching = false;
     float readerLastPinchDist = 0.0f;
     bool readerFullscreen = false;
-    bool readerRotated = false;
+    bool readerRotated = appConfig.readerRotated;
 
     // Estado do Diálogo de Exclusão (Popup)
     bool showDeleteConfirm = false;
@@ -128,6 +137,12 @@ int main(int argc, char* argv[]) {
     ReaderTXT readerTxt;
     ReaderCBZ readerCbz;
     ReaderEPUB readerEpub;
+
+
+    // Texture para rotacao da UI
+    vita2d_texture* uiRenderTarget = vita2d_create_empty_texture_rendertarget(544, 960, SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ABGR);
+    bool analogRotationTriggered = false;
+    int epubFontTimer = 0;
 
     SceCtrlData pad = {0};
     SceCtrlData oldPad = {0};
@@ -184,8 +199,30 @@ int main(int argc, char* argv[]) {
         }
     };
 
+
+    auto startDrawing = [&]() {
+        if (readerRotated && uiRenderTarget) {
+            vita2d_start_drawing_advanced(uiRenderTarget, 0);
+        } else {
+            vita2d_start_drawing();
+        }
+    };
+    
+    auto endDrawing = [&]() {
+        vita2d_end_drawing();
+        if (readerRotated && uiRenderTarget) {
+            vita2d_start_drawing();
+            vita2d_clear_screen();
+            // Desenha a textura girada em 90 graus horario. O centro eh a metade da tela do PS Vita
+            vita2d_draw_texture_rotate(uiRenderTarget, 480.0f, 272.0f, 1.57079632679f);
+            vita2d_end_drawing();
+        }
+        vita2d_swap_buffers();
+    };
+
     auto toggleRotation = [&]() {
         readerRotated = !readerRotated;
+        UIComponents::setRotated(readerRotated);
         readerTxt.setRotated(readerRotated, pgf);
         readerCbz.setRotated(readerRotated);
         readerEpub.setRotated(readerRotated);
@@ -210,16 +247,25 @@ int main(int argc, char* argv[]) {
                 ime_active = 0;
             }
 
-            vita2d_start_drawing();
+            startDrawing();
             vita2d_clear_screen();
             vita2d_common_dialog_update();
-            vita2d_end_drawing();
-            vita2d_swap_buffers();
+            endDrawing();
             continue;
         }
 
         sceCtrlPeekBufferPositive(0, &pad, 1);
-        unsigned int pressed = pad.buttons & ~oldPad.buttons;
+
+        unsigned int logicalButtons = pad.buttons;
+        if (readerRotated) {
+            logicalButtons &= ~(SCE_CTRL_UP | SCE_CTRL_DOWN | SCE_CTRL_LEFT | SCE_CTRL_RIGHT);
+            if (pad.buttons & SCE_CTRL_UP) logicalButtons |= SCE_CTRL_RIGHT;
+            if (pad.buttons & SCE_CTRL_DOWN) logicalButtons |= SCE_CTRL_LEFT;
+            if (pad.buttons & SCE_CTRL_LEFT) logicalButtons |= SCE_CTRL_UP;
+            if (pad.buttons & SCE_CTRL_RIGHT) logicalButtons |= SCE_CTRL_DOWN;
+        }
+        unsigned int pressed = logicalButtons & ~oldPad.buttons;
+
 
         sceTouchPeek(SCE_TOUCH_PORT_FRONT, &touch, 1);
         bool touchDown = (touch.reportNum > 0 && oldTouchNum == 0);
@@ -227,12 +273,61 @@ int main(int argc, char* argv[]) {
         bool touchUp   = (touch.reportNum == 0 && oldTouchNum > 0);
         int touchX = 0;
         int touchY = 0;
+
         if (touch.reportNum > 0) {
             // Converte coordenadas do painel (1920x1088) para a tela (960x544)
             touchX = touch.report[0].x / 2;
             touchY = touch.report[0].y / 2;
+            if (readerRotated) {
+                // Rotacao 90 graus horario
+                int logX = 544 - touchY;
+                int logY = touchX;
+                touchX = logX;
+                touchY = logY;
+            }
         }
+
         oldTouchNum = touch.reportNum;
+
+
+        int rx = pad.rx;
+        int ry = pad.ry;
+        if (readerRotated) {
+            rx = 255 - pad.ry;
+            ry = pad.rx;
+        }
+
+        // Rotacao analogico X
+        if (rx > 240 || rx < 15) {
+            if (!analogRotationTriggered) {
+                toggleRotation();
+                analogRotationTriggered = true;
+            }
+        } else if (rx > 64 && rx < 192) {
+            analogRotationTriggered = false;
+        }
+
+        // Zoom analogico Y
+        if (currentState == AppState::READ_CBZ) {
+            if (ry < 100) {
+                float factor = 1.0f + (100.0f - ry) * 0.0005f;
+                readerCbz.addZoom(factor, readerRotated ? 272.0f : 480.0f, readerRotated ? 480.0f : 272.0f);
+            } else if (ry > 154) {
+                float factor = 1.0f - (ry - 154.0f) * 0.0005f;
+                readerCbz.addZoom(factor, readerRotated ? 272.0f : 480.0f, readerRotated ? 480.0f : 272.0f);
+            }
+        } else if (currentState == AppState::READ_EPUB) {
+            if (epubFontTimer > 0) epubFontTimer--;
+            if (epubFontTimer == 0) {
+                if (ry < 30) {
+                    readerEpub.increaseFontSize();
+                    epubFontTimer = 15;
+                } else if (ry > 225) {
+                    readerEpub.decreaseFontSize();
+                    epubFontTimer = 15;
+                }
+            }
+        }
 
         // Processamento de Gestos Touch unificado para os Leitores (TXT, CBZ, EPUB)
         bool readerTapLeft = false;
@@ -485,16 +580,18 @@ int main(int argc, char* argv[]) {
                         deleteConfirmYesSelected = false;
                     } else if (!isDraggingY) {
                         // Clique simples (sem arraste)
-                        // 1. Campo de Busca (X: 270..560, Y: 14..54)
-                        if (touchStartX >= 270 && touchStartX <= 560 && touchStartY >= 14 && touchStartY <= 54) {
+                        // 1. Campo de Busca (X: 250..490, Y: 14..54)
+                        if (touchStartX >= 250 && touchStartX <= 490 && touchStartY >= 14 && touchStartY <= 54) {
                             currentFocus = FocusArea::SEARCH;
                             launch_ime("Pesquisar", searchQuery.c_str());
                         }
-                        // 2. Botão de Ordenação (X: 572..738, Y: 14..54)
-                        else if (touchStartX >= 572 && touchStartX <= 738 && touchStartY >= 14 && touchStartY <= 54) {
+                        // 2. Botão de Ordenação (X: 500..650, Y: 14..54)
+                        else if (touchStartX >= 500 && touchStartX <= 650 && touchStartY >= 14 && touchStartY <= 54) {
                             currentFocus = FocusArea::SORT;
                             int nextSort = (static_cast<int>(currentSort) + 1) % static_cast<int>(SortMode::COUNT);
                             currentSort = static_cast<SortMode>(nextSort);
+                            appConfig.sortMode = currentSort;
+                            ConfigManager::getInstance().save();
                             FileBrowser::sortItems(allItems, currentSort);
                             visibleItems = FileBrowser::filterItems(allItems, searchQuery);
                             selectedIndex = 0;
@@ -502,17 +599,25 @@ int main(int argc, char* argv[]) {
                             smoothScrollOffset = 0.0f;
                             scrollBarTimer = 120;
                         }
-                        // 3. Botão de Alternância de Layout (X: 748..862, Y: 14..54)
-                        else if (touchStartX >= 748 && touchStartX <= 862 && touchStartY >= 14 && touchStartY <= 54) {
+                        // 3. Botão de Alternância de Layout (X: 660..770, Y: 14..54)
+                        else if (touchStartX >= 660 && touchStartX <= 770 && touchStartY >= 14 && touchStartY <= 54) {
                             currentFocus = FocusArea::LAYOUT;
                             isGridView = !isGridView;
+                            appConfig.isGridView = isGridView;
+                            ConfigManager::getInstance().save();
                             selectedIndex = 0;
                             scrollOffset = 0;
                             smoothScrollOffset = 0.0f;
                             scrollBarTimer = 120;
                         }
-                        // 4. Botão de Refresh (X: 872..932, Y: 14..54)
-                        else if (touchStartX >= 872 && touchStartX <= 932 && touchStartY >= 14 && touchStartY <= 54) {
+                        // 4. Botão de Configurações (X: 780..870, Y: 14..54)
+                        else if (touchStartX >= 780 && touchStartX <= 870 && touchStartY >= 14 && touchStartY <= 54) {
+                            currentFocus = FocusArea::SETTINGS;
+                            currentState = AppState::SETTINGS;
+                            settingsSelectedIndex = 0;
+                        }
+                        // 5. Botão de Refresh (X: 880..935, Y: 14..54)
+                        else if (touchStartX >= 880 && touchStartX <= 935 && touchStartY >= 14 && touchStartY <= 54) {
                             currentFocus = FocusArea::REFRESH;
                             allItems = FileBrowser::scanLibrary();
                             FileBrowser::sortItems(allItems, currentSort);
@@ -522,7 +627,7 @@ int main(int argc, char* argv[]) {
                             smoothScrollOffset = 0.0f;
                             scrollBarTimer = 120;
                         }
-                        // 5. Clique em Item: Abre o item imediatamente
+                        // 6. Clique em Item: Abre o item imediatamente
                         else if (initialTouchItemIndex >= 0 && initialTouchItemIndex < static_cast<int>(visibleItems.size())) {
                             currentFocus = FocusArea::CONTENT;
                             selectedIndex = initialTouchItemIndex;
@@ -642,17 +747,27 @@ int main(int argc, char* argv[]) {
                 } else if (currentFocus == FocusArea::LAYOUT) {
                     if (pressed & SCE_CTRL_DOWN) currentFocus = FocusArea::CONTENT;
                     if (pressed & SCE_CTRL_LEFT) currentFocus = FocusArea::SORT;
-                    if (pressed & SCE_CTRL_RIGHT) currentFocus = FocusArea::REFRESH;
+                    if (pressed & SCE_CTRL_RIGHT) currentFocus = FocusArea::SETTINGS;
                     if (pressed & SCE_CTRL_CROSS) {
                         isGridView = !isGridView;
+                        appConfig.isGridView = isGridView;
+                        ConfigManager::getInstance().save();
                         selectedIndex = 0;
                         scrollOffset = 0;
                         smoothScrollOffset = 0.0f;
                         scrollBarTimer = 120;
                     }
-                } else if (currentFocus == FocusArea::REFRESH) {
+                } else if (currentFocus == FocusArea::SETTINGS) {
                     if (pressed & SCE_CTRL_DOWN) currentFocus = FocusArea::CONTENT;
                     if (pressed & SCE_CTRL_LEFT) currentFocus = FocusArea::LAYOUT;
+                    if (pressed & SCE_CTRL_RIGHT) currentFocus = FocusArea::REFRESH;
+                    if (pressed & SCE_CTRL_CROSS) {
+                        currentState = AppState::SETTINGS;
+                        settingsSelectedIndex = 0;
+                    }
+                } else if (currentFocus == FocusArea::REFRESH) {
+                    if (pressed & SCE_CTRL_DOWN) currentFocus = FocusArea::CONTENT;
+                    if (pressed & SCE_CTRL_LEFT) currentFocus = FocusArea::SETTINGS;
                     if (pressed & SCE_CTRL_CROSS) {
                         allItems = FileBrowser::scanLibrary();
                         FileBrowser::sortItems(allItems, currentSort);
@@ -692,7 +807,7 @@ int main(int argc, char* argv[]) {
             if (scrollBarAlpha > 1.0f) scrollBarAlpha = 1.0f;
 
             // RENDERIZAÇÃO DO MENU
-            vita2d_start_drawing();
+            startDrawing();
             vita2d_clear_screen();
 
             UIComponents::drawTopBar(
@@ -703,6 +818,7 @@ int main(int argc, char* argv[]) {
                 currentFocus == FocusArea::SEARCH,
                 currentFocus == FocusArea::SORT,
                 currentFocus == FocusArea::LAYOUT,
+                currentFocus == FocusArea::SETTINGS,
                 currentFocus == FocusArea::REFRESH
             );
 
@@ -806,9 +922,135 @@ int main(int argc, char* argv[]) {
                 UIComponents::drawConfirmDialog("Excluir Arquivo", msg, deleteConfirmYesSelected);
             }
 
-            vita2d_end_drawing();
-            vita2d_swap_buffers();
+            endDrawing();
 
+
+        } else if (currentState == AppState::SETTINGS) {
+            const int totalSettingsItems = 5;
+
+            // Navegação Vertical (D-pad Cima / Baixo)
+            if (pressed & SCE_CTRL_UP) {
+                if (settingsSelectedIndex > 0) settingsSelectedIndex--;
+            }
+            if (pressed & SCE_CTRL_DOWN) {
+                if (settingsSelectedIndex < totalSettingsItems - 1) settingsSelectedIndex++;
+            }
+
+            // Alternância de Valores (D-pad Esquerda / Direita ou Cruz)
+            bool changePrev = (pressed & SCE_CTRL_LEFT);
+            bool changeNext = (pressed & (SCE_CTRL_RIGHT | SCE_CTRL_CROSS));
+
+            if (changePrev || changeNext) {
+                switch (settingsSelectedIndex) {
+                    case 0: // Modo de Exibição (Lista / Grade)
+                        appConfig.isGridView = !appConfig.isGridView;
+                        isGridView = appConfig.isGridView;
+                        selectedIndex = 0;
+                        scrollOffset = 0;
+                        smoothScrollOffset = 0.0f;
+                        break;
+                    case 1: { // Ordenação Padrão
+                        int count = static_cast<int>(SortMode::COUNT);
+                        int cur = static_cast<int>(appConfig.sortMode);
+                        if (changeNext) cur = (cur + 1) % count;
+                        else cur = (cur - 1 + count) % count;
+                        appConfig.sortMode = static_cast<SortMode>(cur);
+                        currentSort = appConfig.sortMode;
+                        FileBrowser::sortItems(allItems, currentSort);
+                        visibleItems = FileBrowser::filterItems(allItems, searchQuery);
+                        selectedIndex = 0;
+                        scrollOffset = 0;
+                        smoothScrollOffset = 0.0f;
+                        break;
+                    }
+                    case 2: // Orientação do Leitor
+                        appConfig.readerRotated = !appConfig.readerRotated;
+                        readerRotated = appConfig.readerRotated;
+                        UIComponents::setRotated(readerRotated);
+                        readerTxt.setRotated(readerRotated, pgf);
+                        readerCbz.setRotated(readerRotated);
+                        readerEpub.setRotated(readerRotated);
+                        break;
+                    case 3: // Exibir Número de Páginas
+                        appConfig.showPageNumbers = !appConfig.showPageNumbers;
+                        break;
+                    case 4: // Tamanho de Fonte Padrão (EPUB)
+                        if (changeNext) {
+                            if (appConfig.epubFontSize < 44) appConfig.epubFontSize += 2;
+                        } else {
+                            if (appConfig.epubFontSize > 14) appConfig.epubFontSize -= 2;
+                        }
+                        break;
+                }
+                ConfigManager::getInstance().save();
+            }
+
+            // Touch Gestures na tela de Configurações
+            if (touchDown) {
+                float sec1Y = 88.0f + 26.0f;
+                float rowH = 46.0f;
+                float sec2Y = sec1Y + rowH * 2.0f + 50.0f;
+
+                // Item 0
+                if (touchStartY >= sec1Y && touchStartY < sec1Y + rowH) {
+                    settingsSelectedIndex = 0;
+                    appConfig.isGridView = !appConfig.isGridView;
+                    isGridView = appConfig.isGridView;
+                    selectedIndex = 0; scrollOffset = 0; smoothScrollOffset = 0.0f;
+                    ConfigManager::getInstance().save();
+                }
+                // Item 1
+                else if (touchStartY >= sec1Y + rowH && touchStartY < sec1Y + rowH * 2.0f) {
+                    settingsSelectedIndex = 1;
+                    int count = static_cast<int>(SortMode::COUNT);
+                    int cur = (static_cast<int>(appConfig.sortMode) + 1) % count;
+                    appConfig.sortMode = static_cast<SortMode>(cur);
+                    currentSort = appConfig.sortMode;
+                    FileBrowser::sortItems(allItems, currentSort);
+                    visibleItems = FileBrowser::filterItems(allItems, searchQuery);
+                    selectedIndex = 0; scrollOffset = 0; smoothScrollOffset = 0.0f;
+                    ConfigManager::getInstance().save();
+                }
+                // Item 2
+                else if (touchStartY >= sec2Y && touchStartY < sec2Y + rowH) {
+                    settingsSelectedIndex = 2;
+                    appConfig.readerRotated = !appConfig.readerRotated;
+                    readerRotated = appConfig.readerRotated;
+                    UIComponents::setRotated(readerRotated);
+                    readerTxt.setRotated(readerRotated, pgf);
+                    readerCbz.setRotated(readerRotated);
+                    readerEpub.setRotated(readerRotated);
+                    ConfigManager::getInstance().save();
+                }
+                // Item 3
+                else if (touchStartY >= sec2Y + rowH && touchStartY < sec2Y + rowH * 2.0f) {
+                    settingsSelectedIndex = 3;
+                    appConfig.showPageNumbers = !appConfig.showPageNumbers;
+                    ConfigManager::getInstance().save();
+                }
+                // Item 4
+                else if (touchStartY >= sec2Y + rowH * 2.0f && touchStartY < sec2Y + rowH * 3.0f) {
+                    settingsSelectedIndex = 4;
+                    if (touchStartX > 600) {
+                        if (appConfig.epubFontSize < 44) appConfig.epubFontSize += 2;
+                    } else {
+                        if (appConfig.epubFontSize > 14) appConfig.epubFontSize -= 2;
+                    }
+                    ConfigManager::getInstance().save();
+                }
+            }
+
+            // Voltar para o MENU
+            if (pressed & SCE_CTRL_CIRCLE) {
+                ConfigManager::getInstance().save();
+                currentState = AppState::MENU;
+                currentFocus = FocusArea::CONTENT;
+            }
+
+            startDrawing();
+            vita2d_clear_screen();
+            UIComponents::drawSettingsScreen(settingsSelectedIndex, appConfig);
+            endDrawing();
 
         } else if (currentState == AppState::READ_TXT) {
             if (pressed & (SCE_CTRL_RTRIGGER | SCE_CTRL_R1)) {
@@ -830,11 +1072,10 @@ int main(int argc, char* argv[]) {
                 currentState = AppState::MENU;
             }
 
-            vita2d_start_drawing();
+            startDrawing();
             vita2d_clear_screen();
             readerTxt.render(pgf, readerFullscreen);
-            vita2d_end_drawing();
-            vita2d_swap_buffers();
+            endDrawing();
 
         } else if (currentState == AppState::READ_CBZ) {
             if (pressed & (SCE_CTRL_RTRIGGER | SCE_CTRL_R1)) {
@@ -856,11 +1097,10 @@ int main(int argc, char* argv[]) {
                 currentState = AppState::MENU;
             }
 
-            vita2d_start_drawing();
+            startDrawing();
             vita2d_clear_screen();
             readerCbz.render(pgf, readerFullscreen);
-            vita2d_end_drawing();
-            vita2d_swap_buffers();
+            endDrawing();
 
         } else if (currentState == AppState::READ_EPUB) {
             if (pressed & (SCE_CTRL_RTRIGGER | SCE_CTRL_R1)) {
@@ -888,14 +1128,14 @@ int main(int argc, char* argv[]) {
                 currentState = AppState::MENU;
             }
 
-            vita2d_start_drawing();
+            startDrawing();
             vita2d_clear_screen();
             readerEpub.render(pgf, readerFullscreen);
-            vita2d_end_drawing();
-            vita2d_swap_buffers();
+            endDrawing();
         }
 
-        oldPad = pad;
+        oldPad.buttons = logicalButtons; // save logical for edge detection
+        oldPad.rx = pad.rx; oldPad.ry = pad.ry;
     }
 
     UIComponents::shutdown();

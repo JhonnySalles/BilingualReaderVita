@@ -24,6 +24,7 @@ ReaderEPUB::~ReaderEPUB() {
 
 void ReaderEPUB::freeTexture() {
     if (pageTexture) {
+        vita2d_wait_rendering_done();
         vita2d_free_texture(pageTexture);
         pageTexture = nullptr;
     }
@@ -60,7 +61,12 @@ bool ReaderEPUB::loadFile(const std::string& path, vita2d_pgf* font) {
     if (!ctx) return false;
 
     fz_register_document_handlers(ctx);
-    fz_set_user_css(ctx, "body { color: #e2e8f0; background: transparent; } p, div, span, h1, h2, h3, h4, h5, h6, li, a { color: #e2e8f0; }");
+    fz_set_user_css(ctx, 
+        "@page { margin: 0; } "
+        "html, body { margin: 0; padding: 4px; background: transparent; color: #e2e8f0; } "
+        "img, svg { max-width: 100%; max-height: 100%; height: auto; display: block; margin: 0 auto; } "
+        "p, div, span, h1, h2, h3, h4, h5, h6, li, a { color: #e2e8f0; }"
+    );
 
     fz_try(ctx) {
         doc = fz_open_document(ctx, path.c_str());
@@ -87,8 +93,8 @@ void ReaderEPUB::relayout() {
 
     if (fz_is_document_reflowable(ctx, doc)) {
         // Dimensões úteis dependendo da rotação
-        float layoutW = isRotated ? 480.0f : 900.0f;
-        float layoutH = isRotated ? 880.0f : 460.0f;
+        float layoutW = isRotated ? 520.0f : 940.0f;
+        float layoutH = isRotated ? 920.0f : 500.0f;
         fz_layout_document(ctx, doc, layoutW, layoutH, currentFontSize);
     }
 
@@ -220,7 +226,8 @@ void ReaderEPUB::prevPage() {
 
 void ReaderEPUB::render(vita2d_pgf* font, bool fullscreen) {
     // Fundo elegante para livro
-    vita2d_draw_rectangle(0, 0, 960, 544, RGBA8(24, 26, 36, 255));
+    float screenW = isRotated ? 544.0f : 960.0f; float screenH = isRotated ? 960.0f : 544.0f;
+    vita2d_draw_rectangle(0, 0, screenW, screenH, RGBA8(24, 26, 36, 255));
 
     if (!fullscreen) {
         char pageInfo[64];
@@ -233,20 +240,14 @@ void ReaderEPUB::render(vita2d_pgf* font, bool fullscreen) {
         float texW = static_cast<float>(vita2d_texture_get_width(pageTexture));
         float texH = static_cast<float>(vita2d_texture_get_height(pageTexture));
 
-        if (isRotated) {
-            // Em rotação 90 graus (retrato na tela paisagem do Vita)
-            // O centro da tela do PS Vita é (480, 272)
-            float rad = 1.57079632679f; // 90 graus em radianos
-            vita2d_draw_texture_rotate(pageTexture, 480.0f, 272.0f, rad);
-        } else {
-            float drawX = (960.0f - texW) / 2.0f;
+        
+            float drawX = (screenW - texW) / 2.0f;
             float topOffset = fullscreen ? 0.0f : 48.0f;
             float bottomOffset = fullscreen ? 0.0f : 40.0f;
-            float availableH = 544.0f - topOffset - bottomOffset;
+            float availableH = screenH - topOffset - bottomOffset;
             float drawY = topOffset + ((availableH - texH) / 2.0f);
 
             vita2d_draw_texture(pageTexture, drawX, drawY);
-        }
     }
 
     if (!fullscreen) {

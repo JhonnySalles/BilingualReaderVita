@@ -46,7 +46,9 @@ target_compile_options(unrar PRIVATE -Wno-switch)
 
 set(SOURCES
   src/main.cpp
+  src/image_loader.cpp
   src/ui_components.cpp
+  src/config_manager.cpp
   src/file_browser.cpp
   src/file_utils.cpp
   src/cache_manager.cpp
