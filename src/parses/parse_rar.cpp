@@ -105,13 +105,15 @@ bool ParseRar::extractAllWithProgress() {
                 extracted++;
             }
             
-            // Desenha o progresso
-            float progress = (float)extracted / (float)totalImages;
-            vita2d_start_drawing();
-            vita2d_clear_screen();
-            UIComponents::drawProgressPopup("Extraindo", "Descompactando...", progress);
-            vita2d_end_drawing();
-            vita2d_swap_buffers();
+            // Desenha o progresso apenas a cada 5 páginas ou no início/fim para evitar timeout de semáforo gráfico
+            if (extracted == 1 || extracted == totalImages || (extracted % 5 == 0)) {
+                float progress = (float)extracted / (float)totalImages;
+                vita2d_start_drawing();
+                vita2d_clear_screen();
+                UIComponents::drawProgressPopup("Extraindo", "Descompactando...", progress);
+                vita2d_end_drawing();
+                vita2d_swap_buffers();
+            }
         } else {
             RARProcessFile(hArc, RAR_SKIP, NULL, NULL);
         }

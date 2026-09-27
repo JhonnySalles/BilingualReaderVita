@@ -68,7 +68,6 @@ target_link_libraries(${PROJECT_NAME}
   vita2d
   freetype
   png
-  jpeg
   z
   m
   pthread
