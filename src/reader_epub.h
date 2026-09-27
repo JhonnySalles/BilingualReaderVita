@@ -20,6 +20,10 @@ public:
     void increaseFontSize();
     void decreaseFontSize();
 
+    void resetZoom();
+    void addZoom(float factor, float focusX, float focusY);
+    void addPan(float dx, float dy);
+
     void setRotated(bool rotated);
     bool getRotated() const { return isRotated; }
 
@@ -34,6 +38,9 @@ private:
     int totalPages;
     float currentFontSize;
     bool isRotated;
+    float zoomScale;
+    float panX;
+    float panY;
 
     fz_context* ctx;
     fz_document* doc;

@@ -50,7 +50,6 @@ void ReaderCBZ::addZoom(float factor, float focusX, float focusY) {
     float ratio = zoomScale / oldZoom;
     panX = focusX - (focusX - panX) * ratio;
     panY = focusY - (focusY - panY) * ratio;
-    loadPageTexture(currentPage);
 }
 
 void ReaderCBZ::addPan(float dx, float dy) {
@@ -177,13 +176,11 @@ void ReaderCBZ::loadPageTexture(int pageIndex) {
         return;
     }
 
-    // Calcula resolução otimizada para o PS Vita
-    // Aplica o zoomScale diretamente para manter nitidez
+    // Calcula resolução base adaptada à tela do PS Vita
     float maxDimW = isRotated ? 544.0f : 960.0f;
     float maxDimH = isRotated ? 960.0f : 544.0f;
-    float baseScale = std::min(maxDimW / pageW, maxDimH / pageH);
-    float scale = baseScale * zoomScale;
-    if (scale > 3.0f) scale = 3.0f;
+    float scale = std::min(maxDimW / pageW, maxDimH / pageH);
+    if (scale > 2.0f) scale = 2.0f;
     if (scale < 0.2f) scale = 0.2f;
 
     fz_matrix ctm = fz_scale(scale, scale);
@@ -249,23 +246,20 @@ void ReaderCBZ::prevPage() {
 
 void ReaderCBZ::render(vita2d_pgf* font, bool fullscreen) {
     // Fundo escuro focado para leitura de mangá
-    float screenW = isRotated ? 544.0f : 960.0f; float screenH = isRotated ? 960.0f : 544.0f;
+    float screenW = isRotated ? 544.0f : 960.0f; 
+    float screenH = isRotated ? 960.0f : 544.0f;
     vita2d_draw_rectangle(0, 0, screenW, screenH, RGBA8(10, 10, 12, 255));
 
     if (currentTexture) {
         unsigned int texW = vita2d_texture_get_width(currentTexture);
         unsigned int texH = vita2d_texture_get_height(currentTexture);
 
-        
-            float renderW = static_cast<float>(texW);
-            float renderH = static_cast<float>(texH);
-            float topOffset = fullscreen ? 0.0f : 48.0f;
-            float bottomOffset = fullscreen ? 0.0f : 40.0f;
-            float availableH = screenH - topOffset - bottomOffset;
+        float renderW = static_cast<float>(texW) * zoomScale;
+        float renderH = static_cast<float>(texH) * zoomScale;
 
-            float posX = ((screenW - renderW) / 2.0f) + panX;
-            float posY = topOffset + ((availableH - renderH) / 2.0f) + panY;
-            vita2d_draw_texture(currentTexture, posX, posY);
+        float posX = ((screenW - renderW) / 2.0f) + panX;
+        float posY = ((screenH - renderH) / 2.0f) + panY;
+        vita2d_draw_texture_scale(currentTexture, posX, posY, zoomScale, zoomScale);
     } else {
         // Fallback visual com indicador moderno
         UIComponents::drawRoundedBox(screenW/2.0f - 150.0f, screenH/2.0f - 50.0f, 300, 100, 12.0f, UITheme::Surface);

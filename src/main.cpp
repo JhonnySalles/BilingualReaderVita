@@ -1,6 +1,7 @@
 #include <vita2d.h>
 #include <psp2/ctrl.h>
 #include <psp2/touch.h>
+#include <psp2/display.h>
 #include <psp2/kernel/processmgr.h>
 #include <psp2/ime_dialog.h>
 #include <vector>
@@ -39,19 +40,63 @@ static uint16_t ime_text_utf16[SCE_IME_DIALOG_MAX_TEXT_LENGTH];
 static uint16_t ime_initial_utf16[SCE_IME_DIALOG_MAX_TEXT_LENGTH];
 
 static void utf8_to_utf16(const uint8_t *src, uint16_t *dst) {
-    int i = 0;
-    for (i = 0; src[i]; i++) {
-        dst[i] = src[i];
+    if (!src || !dst) return;
+    int di = 0;
+    for (int si = 0; src[si]; ) {
+        uint32_t codepoint = 0;
+        uint8_t c = src[si++];
+        if (c < 0x80) {
+            codepoint = c;
+        } else if ((c & 0xE0) == 0xC0) {
+            if (!src[si]) break;
+            codepoint = ((c & 0x1F) << 6) | (src[si++] & 0x3F);
+        } else if ((c & 0xF0) == 0xE0) {
+            if (!src[si] || !src[si + 1]) break;
+            codepoint = ((c & 0x0F) << 12) | ((src[si] & 0x3F) << 6) | (src[si + 1] & 0x3F);
+            si += 2;
+        } else if ((c & 0xF8) == 0xF0) {
+            if (!src[si] || !src[si + 1] || !src[si + 2]) break;
+            codepoint = ((c & 0x07) << 18) | ((src[si] & 0x3F) << 12) | ((src[si + 1] & 0x3F) << 6) | (src[si + 2] & 0x3F);
+            si += 3;
+        }
+
+        if (codepoint <= 0xFFFF) {
+            dst[di++] = (uint16_t)codepoint;
+        } else {
+            codepoint -= 0x10000;
+            dst[di++] = (uint16_t)(0xD800 + (codepoint >> 10));
+            dst[di++] = (uint16_t)(0xDC00 + (codepoint & 0x3FF));
+        }
     }
-    dst[i] = 0;
+    dst[di] = 0;
 }
 
 static void utf16_to_utf8(const uint16_t *src, uint8_t *dst) {
-    int i = 0;
-    for (i = 0; src[i]; i++) {
-        dst[i] = (uint8_t)src[i];
+    if (!src || !dst) return;
+    int di = 0;
+    for (int si = 0; src[si]; ) {
+        uint32_t codepoint = src[si++];
+        if (codepoint >= 0xD800 && codepoint <= 0xDBFF && src[si] >= 0xDC00 && src[si] <= 0xDFFF) {
+            codepoint = 0x10000 + (((codepoint - 0xD800) << 10) | (src[si++] - 0xDC00));
+        }
+
+        if (codepoint < 0x80) {
+            dst[di++] = (uint8_t)codepoint;
+        } else if (codepoint < 0x800) {
+            dst[di++] = (uint8_t)(0xC0 | (codepoint >> 6));
+            dst[di++] = (uint8_t)(0x80 | (codepoint & 0x3F));
+        } else if (codepoint < 0x10000) {
+            dst[di++] = (uint8_t)(0xE0 | (codepoint >> 12));
+            dst[di++] = (uint8_t)(0x80 | ((codepoint >> 6) & 0x3F));
+            dst[di++] = (uint8_t)(0x80 | (codepoint & 0x3F));
+        } else {
+            dst[di++] = (uint8_t)(0xF0 | (codepoint >> 18));
+            dst[di++] = (uint8_t)(0x80 | ((codepoint >> 12) & 0x3F));
+            dst[di++] = (uint8_t)(0x80 | ((codepoint >> 6) & 0x3F));
+            dst[di++] = (uint8_t)(0x80 | (codepoint & 0x3F));
+        }
     }
-    dst[i] = 0;
+    dst[di] = 0;
 }
 
 static void launch_ime(const char* title, const char* initial_text) {
@@ -141,6 +186,12 @@ int main(int argc, char* argv[]) {
 
     // Texture para rotacao da UI
     vita2d_texture* uiRenderTarget = vita2d_create_empty_texture_rendertarget(544, 960, SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ABGR);
+    vita2d_texture* uiBgTex = vita2d_create_empty_texture(1, 1);
+    if (uiBgTex) {
+        unsigned int* data = (unsigned int*)vita2d_texture_get_datap(uiBgTex);
+        *data = RGBA8(255, 255, 255, 255);
+    }
+
     bool analogRotationTriggered = false;
     int epubFontTimer = 0;
 
@@ -203,6 +254,10 @@ int main(int argc, char* argv[]) {
     auto startDrawing = [&]() {
         if (readerRotated && uiRenderTarget) {
             vita2d_start_drawing_advanced(uiRenderTarget, 0);
+            vita2d_clear_screen();
+            if (uiBgTex) {
+                vita2d_draw_texture_tint_scale(uiBgTex, 0, 0, 544.0f, 960.0f, UITheme::Background);
+            }
         } else {
             vita2d_start_drawing();
         }
@@ -218,6 +273,7 @@ int main(int argc, char* argv[]) {
             vita2d_end_drawing();
         }
         vita2d_swap_buffers();
+        sceDisplayWaitVblankStart();
     };
 
     auto toggleRotation = [&]() {
@@ -280,8 +336,8 @@ int main(int argc, char* argv[]) {
             touchY = touch.report[0].y / 2;
             if (readerRotated) {
                 // Rotacao 90 graus horario
-                int logX = 544 - touchY;
-                int logY = touchX;
+                int logX = touchY;
+                int logY = 960 - touchX;
                 touchX = logX;
                 touchY = logY;
             }
@@ -352,6 +408,8 @@ int main(int argc, char* argv[]) {
                     float factor = dist / readerLastPinchDist;
                     if (currentState == AppState::READ_CBZ) {
                         readerCbz.addZoom(factor, midX, midY);
+                    } else if (currentState == AppState::READ_EPUB) {
+                        readerEpub.addZoom(factor, midX, midY);
                     }
                     readerLastPinchDist = dist;
                 }
@@ -374,8 +432,12 @@ int main(int argc, char* argv[]) {
 
                     int dx = touchX - readerLastTouchX;
                     int dy = touchY - readerLastTouchY;
-                    if (readerIsDragging && currentState == AppState::READ_CBZ) {
-                        readerCbz.addPan(static_cast<float>(dx), static_cast<float>(dy));
+                    if (readerIsDragging) {
+                        if (currentState == AppState::READ_CBZ) {
+                            readerCbz.addPan(static_cast<float>(dx), static_cast<float>(dy));
+                        } else if (currentState == AppState::READ_EPUB) {
+                            readerEpub.addPan(static_cast<float>(dx), static_cast<float>(dy));
+                        }
                     }
                     readerLastTouchX = touchX;
                     readerLastTouchY = touchY;
@@ -435,9 +497,9 @@ int main(int argc, char* argv[]) {
         }
 
         if (currentState == AppState::MENU) {
-            const int gridCols = 3;
-            const int listVisibleCount = 5;
-            const int gridVisibleCount = 6; // 3 colunas x 2 linhas
+            const int gridCols = readerRotated ? 2 : 3;
+            const int listVisibleCount = readerRotated ? 10 : 5;
+            const int gridVisibleCount = readerRotated ? 10 : 6;
 
             // GESTÃO DO POPUP DE CONFIRMAÇÃO DE DELEÇÃO
             if (showDeleteConfirm) {
@@ -525,7 +587,8 @@ int main(int argc, char* argv[]) {
                             int renderCount = std::min(static_cast<int>(visibleItems.size()) - scrollOffset, listVisibleCount);
                             for (int i = 0; i < renderCount; i++) {
                                 float y = startY + i * (cardHeight + cardSpacing);
-                                if (touchStartX >= 32 && touchStartX <= 928 && touchStartY >= y && touchStartY <= (y + cardHeight)) {
+                                float cardW = readerRotated ? 480.0f : 896.0f;
+                                if (touchStartX >= 32 && touchStartX <= (32 + cardW) && touchStartY >= y && touchStartY <= (y + cardHeight)) {
                                     initialTouchItemIndex = scrollOffset + i;
                                     break;
                                 }
@@ -533,7 +596,7 @@ int main(int argc, char* argv[]) {
                         } else {
                             float startX = 32.0f;
                             float startY = 86.0f;
-                            float cardW = 282.0f;
+                            float cardW = readerRotated ? 230.0f : 282.0f;
                             float cardH = 192.0f;
                             float gapX = 25.0f;
                             float gapY = 16.0f;
@@ -846,7 +909,9 @@ int main(int argc, char* argv[]) {
 
                         float cardTop = y;
                         float cardBottom = y + cardHeight;
-                        if (cardBottom <= 68.0f || cardTop >= 504.0f) {
+                        float clipBottom = readerRotated ? 920.0f : 504.0f;
+                        float clipFadeBottom = readerRotated ? 912.0f : 496.0f;
+                        if (cardBottom <= 68.0f || cardTop >= clipBottom) {
                             continue;
                         }
 
@@ -854,12 +919,13 @@ int main(int argc, char* argv[]) {
                         float cardAlpha = 1.0f;
                         if (cardTop < 86.0f) {
                             cardAlpha = (cardBottom - 68.0f) / cardHeight;
-                        } else if (cardBottom > 496.0f) {
-                            cardAlpha = (504.0f - cardTop) / cardHeight;
+                        } else if (cardBottom > clipFadeBottom) {
+                            cardAlpha = (clipBottom - cardTop) / cardHeight;
                         }
                         cardAlpha = std::max(0.0f, std::min(1.0f, cardAlpha));
 
-                        UIComponents::drawListCard(32.0f, y, 896.0f, cardHeight, isSelected, item, cardAlpha);
+                        float cardListW = readerRotated ? 480.0f : 896.0f;
+                        UIComponents::drawListCard(32.0f, y, cardListW, cardHeight, isSelected, item, cardAlpha);
                     }
 
                     // Barra de rolagem animada com fade
@@ -869,7 +935,7 @@ int main(int argc, char* argv[]) {
                     // Renderização em Grade com Animação e Fade nos Extremos
                     float startX = 32.0f;
                     float startY = 86.0f;
-                    float cardW = 282.0f;
+                    float cardW = readerRotated ? 230.0f : 282.0f;
                     float cardH = 192.0f;
                     float gapX = 25.0f;
                     float gapY = 16.0f;
@@ -893,7 +959,9 @@ int main(int argc, char* argv[]) {
 
                             float cardTop = y;
                             float cardBottom = y + cardH;
-                            if (cardBottom <= 68.0f || cardTop >= 504.0f) {
+                            float clipBottom = readerRotated ? 920.0f : 504.0f;
+                            float clipFadeBottom = readerRotated ? 912.0f : 496.0f;
+                            if (cardBottom <= 68.0f || cardTop >= clipBottom) {
                                 continue;
                             }
 
@@ -901,8 +969,8 @@ int main(int argc, char* argv[]) {
                             float cardAlpha = 1.0f;
                             if (cardTop < 86.0f) {
                                 cardAlpha = (cardBottom - 68.0f) / cardH;
-                            } else if (cardBottom > 496.0f) {
-                                cardAlpha = (504.0f - cardTop) / cardH;
+                            } else if (cardBottom > clipFadeBottom) {
+                                cardAlpha = (clipBottom - cardTop) / cardH;
                             }
                             cardAlpha = std::max(0.0f, std::min(1.0f, cardAlpha));
 

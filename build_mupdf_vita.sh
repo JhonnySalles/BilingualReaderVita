@@ -16,7 +16,8 @@ cd libs/mupdf_src
 echo "=== Compilando geradores host primeiro se necessario ==="
 # O MuPDF precisa de ferramentas host (fontdump, cmapdump) compiladas para o sistema host
 # Vamos compilar a biblioteca estatica do MuPDF desabilitando apps de desktop e tesseract
-make -j4 HAVE_X11=no HAVE_GLUT=no HAVE_CURL=no HAVE_LEPTONICA=no HAVE_TESSERACT=no USE_SYSTEM_LIBS=no libs
+# IMPORTANTE: USE_SYSTEM_LIBJPEG=yes para alinhar a versao da libjpeg (v62) com o VitaSDK
+make -j4 HAVE_X11=no HAVE_GLUT=no HAVE_CURL=no HAVE_LEPTONICA=no HAVE_TESSERACT=no USE_SYSTEM_LIBJPEG=yes USE_SYSTEM_ZLIB=yes libs
 
 echo "=== Copiando libs e headers para libs/mupdf ==="
 mkdir -p ../mupdf/lib

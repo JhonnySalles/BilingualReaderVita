@@ -7,8 +7,8 @@ vita2d_pgf* UIComponents::pgf = nullptr;
 vita2d_texture* UIComponents::appIcon = nullptr;
 
 static bool isRotatedUi = false;
-static float screenW = screenW;
-static float screenH = screenH;
+static float screenW = 960.0f;
+static float screenH = 544.0f;
 
 void UIComponents::init(vita2d_pgf* defaultPgf) {
     pgf = defaultPgf;
@@ -31,8 +31,8 @@ void UIComponents::shutdown() {
 
 void UIComponents::setRotated(bool rotated) {
     isRotatedUi = rotated;
-    screenW = rotated ? screenH : screenW;
-    screenH = rotated ? screenW : screenH;
+    screenW = rotated ? 544.0f : 960.0f;
+    screenH = rotated ? 960.0f : 544.0f;
 }
 
 void UIComponents::drawRoundedBox(float x, float y, float w, float h, float radius, unsigned int color) {
@@ -105,9 +105,9 @@ void UIComponents::drawTopBar(
     }
 
     // Campo de Busca
-    float searchX = isRotatedUi ? 170.0f : 250.0f;
+    float searchX = isRotatedUi ? 180.0f : 250.0f;
     float searchY = 14.0f;
-    float searchW = isRotatedUi ? 120.0f : 240.0f;
+    float searchW = isRotatedUi ? 130.0f : 240.0f;
     float searchH = 40.0f;
 
     unsigned int searchBg = isSearchActive ? UITheme::SearchBarActive : (isSearchSelected ? UITheme::SurfaceActive : UITheme::SearchBarBg);
@@ -130,9 +130,9 @@ void UIComponents::drawTopBar(
     }
 
     // Botão de Ordenação
-    float sortX = isRotatedUi ? 295.0f : 500.0f;
+    float sortX = isRotatedUi ? 320.0f : 500.0f;
     float sortY = 14.0f;
-    float sortW = isRotatedUi ? 95.0f : 150.0f;
+    float sortW = isRotatedUi ? 60.0f : 150.0f;
     float sortH = 40.0f;
 
     unsigned int sortBg = isSortSelected ? UITheme::SurfaceActive : UITheme::Surface;
@@ -148,9 +148,9 @@ void UIComponents::drawTopBar(
     }
 
     // Botão de Alternância Lista / Grade
-    float layoutX = isRotatedUi ? 395.0f : 660.0f;
+    float layoutX = isRotatedUi ? 390.0f : 660.0f;
     float layoutY = 14.0f;
-    float layoutW = isRotatedUi ? 45.0f : 110.0f;
+    float layoutW = isRotatedUi ? 40.0f : 110.0f;
     float layoutH = 40.0f;
 
     unsigned int layoutBg = isLayoutSelected ? UITheme::SurfaceActive : UITheme::Surface;
@@ -166,9 +166,9 @@ void UIComponents::drawTopBar(
     }
 
     // Botão de Configurações
-    float cfgX = isRotatedUi ? 445.0f : 780.0f;
+    float cfgX = isRotatedUi ? 440.0f : 780.0f;
     float cfgY = 14.0f;
-    float cfgW = isRotatedUi ? 45.0f : 90.0f;
+    float cfgW = isRotatedUi ? 40.0f : 90.0f;
     float cfgH = 40.0f;
 
     unsigned int cfgBg = isSettingsSelected ? UITheme::SurfaceActive : UITheme::Surface;
@@ -184,7 +184,7 @@ void UIComponents::drawTopBar(
     }
 
     // Botão de Refresh
-    float refreshX = isRotatedUi ? 495.0f : 880.0f;
+    float refreshX = isRotatedUi ? 490.0f : 880.0f;
     float refreshY = 14.0f;
     float refreshW = isRotatedUi ? 40.0f : 55.0f;
     float refreshH = 40.0f;
@@ -255,13 +255,17 @@ void UIComponents::drawConfirmDialog(const std::string& title, const std::string
 }
 
 void UIComponents::drawProgressPopup(const std::string& title, const std::string& message, float progress) {
+    // Override dimension for this popup since it is drawn directly to the physical screen
+    float physW = 960.0f;
+    float physH = 544.0f;
+
     // Backdrop escuro semitransparente
-    vita2d_draw_rectangle(0, 0, screenW, screenH, RGBA8(0, 0, 0, 190));
+    vita2d_draw_rectangle(0, 0, physW, physH, RGBA8(0, 0, 0, 190));
 
     float dlgW = 480.0f;
     float dlgH = 190.0f;
-    float dlgX = (screenW - dlgW) / 2.0f;
-    float dlgY = (screenH - dlgH) / 2.0f;
+    float dlgX = (physW - dlgW) / 2.0f;
+    float dlgY = (physH - dlgH) / 2.0f;
 
     // Caixa do diálogo
     drawRoundedBox(dlgX, dlgY, dlgW, dlgH, 12.0f, UITheme::Surface);
@@ -389,7 +393,7 @@ void UIComponents::drawLibraryScrollBar(float currentOffset, int totalItems, int
 
     float trackX = screenW - 12.0f;
     float trackY = 80.0f;
-    float trackH = 412.0f;
+    float trackH = screenH - 132.0f;
     float trackW = 5.0f;
 
     // Fundo do trilho da scrollbar

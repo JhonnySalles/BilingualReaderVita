@@ -1,12 +1,25 @@
 #include "image_loader.h"
 #include <cstdio>
 #include <vector>
+#include <algorithm>
 
 extern "C" {
 #include <mupdf/fitz.h>
 }
 
 namespace ImageLoader {
+
+static fz_context* getFzContext() {
+    static fz_context* s_ctx = nullptr;
+    if (!s_ctx) {
+        // Cache reduzido para 8MB apenas para decodificação pontual de capas / imagens
+        s_ctx = fz_new_context(NULL, NULL, 8 * 1024 * 1024);
+        if (s_ctx) {
+            fz_register_document_handlers(s_ctx);
+        }
+    }
+    return s_ctx;
+}
 
 static vita2d_texture* createTextureFromPixmap(fz_context* ctx, fz_pixmap* pix) {
     if (!ctx || !pix) return nullptr;
@@ -59,10 +72,8 @@ vita2d_texture* loadTextureFromFile(const std::string& filePath) {
         if (tex) return tex;
     }
 
-    fz_context* ctx = fz_new_context(NULL, NULL, 16 * 1024 * 1024);
+    fz_context* ctx = getFzContext();
     if (!ctx) return nullptr;
-
-    fz_register_document_handlers(ctx);
 
     fz_document* doc = nullptr;
     fz_page* page = nullptr;
@@ -113,14 +124,12 @@ vita2d_texture* loadTextureFromFile(const std::string& filePath) {
         if (page) fz_drop_page(ctx, page);
         if (doc) fz_drop_document(ctx, doc);
         if (pix) fz_drop_pixmap(ctx, pix);
-        fz_drop_context(ctx);
         return nullptr;
     }
 
     if (pix) {
         fz_drop_pixmap(ctx, pix);
     }
-    fz_drop_context(ctx);
 
     return tex;
 }
@@ -128,10 +137,8 @@ vita2d_texture* loadTextureFromFile(const std::string& filePath) {
 vita2d_texture* loadTextureFromBuffer(const unsigned char* buffer, size_t size) {
     if (!buffer || size == 0) return nullptr;
 
-    fz_context* ctx = fz_new_context(NULL, NULL, 16 * 1024 * 1024);
+    fz_context* ctx = getFzContext();
     if (!ctx) return nullptr;
-
-    fz_register_document_handlers(ctx);
 
     fz_buffer* fzbuf = nullptr;
     fz_stream* stm = nullptr;
@@ -193,14 +200,12 @@ vita2d_texture* loadTextureFromBuffer(const unsigned char* buffer, size_t size) 
         if (stm) fz_drop_stream(ctx, stm);
         if (fzbuf) fz_drop_buffer(ctx, fzbuf);
         if (pix) fz_drop_pixmap(ctx, pix);
-        fz_drop_context(ctx);
         return nullptr;
     }
 
     if (pix) {
         fz_drop_pixmap(ctx, pix);
     }
-    fz_drop_context(ctx);
 
     return tex;
 }
