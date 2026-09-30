@@ -64,6 +64,7 @@ add_executable(${PROJECT_NAME} ${SOURCES})
 target_link_libraries(${PROJECT_NAME}
   unrar
   mupdf
+  jpeg
   mupdf-third
   vita2d
   freetype

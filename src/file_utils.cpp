@@ -35,7 +35,7 @@ std::string getFileName(const std::string& path) {
 
 bool isImageFile(const std::string& filename) {
     std::string ext = getExtension(filename);
-    return (ext == "png" || ext == "jpg" || ext == "jpeg" || ext == "bmp" || ext == "webp");
+    return (ext == "png" || ext == "jpg" || ext == "jpeg" || ext == "bmp" || ext == "webp" || ext == "gif" || ext == "tga");
 }
 
 bool naturalSortCompare(const std::string& a, const std::string& b) {
