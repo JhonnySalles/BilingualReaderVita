@@ -132,7 +132,7 @@ void ReaderTXT::render(vita2d_pgf* font, bool fullscreen) {
             std::istringstream stream(pages[currentPage]);
             std::string line;
             int yPos = fullscreen ? 36 : 84;
-            int xPos = isRotated ? 240 : 48;
+            int xPos = isRotated ? 24 : 48;
             while (std::getline(stream, line)) {
                 vita2d_pgf_draw_text(font, (float)xPos, (float)yPos, UITheme::TextPrimary, 0.95f, line.c_str());
                 yPos += 24;

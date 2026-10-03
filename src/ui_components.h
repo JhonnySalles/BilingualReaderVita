@@ -3,6 +3,50 @@
 #include <string>
 #include "file_browser.h"
 
+struct UIRect {
+    float x = 0.0f;
+    float y = 0.0f;
+    float w = 0.0f;
+    float h = 0.0f;
+
+    bool contains(float px, float py) const {
+        return px >= x && px <= (x + w) && py >= y && py <= (y + h);
+    }
+};
+
+struct UITopBarLayout {
+    UIRect search;
+    UIRect sort;
+    UIRect layout;
+    UIRect settings;
+    UIRect refresh;
+};
+
+struct UIReaderChromeLayout {
+    UIRect rotateBtn;
+    UIRect prevBook;
+    UIRect nextBook;
+    float contentTop = 48.0f;
+    float contentBottom = 504.0f;
+    float screenW = 960.0f;
+    float screenH = 544.0f;
+};
+
+struct UIConfirmDialogLayout {
+    UIRect dialog;
+    UIRect yesBtn;
+    UIRect noBtn;
+};
+
+struct UISettingsLayout {
+    UIRect item0;
+    UIRect item1;
+    UIRect item2;
+    UIRect item3;
+    UIRect item4;
+    float fontValueSplitX = 600.0f;
+};
+
 namespace UITheme {
     constexpr unsigned int Background      = RGBA8(18, 20, 29, 255);
     constexpr unsigned int Surface         = RGBA8(28, 32, 46, 255);
@@ -36,6 +80,15 @@ public:
     static void init(vita2d_pgf* defaultPgf);
     static void shutdown();
     static void setRotated(bool rotated);
+    static bool isRotated();
+    static float getScreenW();
+    static float getScreenH();
+
+    static UITopBarLayout getTopBarLayout();
+    static UIReaderChromeLayout getReaderChromeLayout();
+    static UIConfirmDialogLayout getConfirmDialogLayout();
+    static UISettingsLayout getSettingsLayout();
+
     static void drawRoundedBox(float x, float y, float w, float h, float radius, unsigned int color);
     
     // Top Bar com Campo de Pesquisa, Ícone de Ordenação, Alternância de Grid/Lista, Botão Configurações e Refresh

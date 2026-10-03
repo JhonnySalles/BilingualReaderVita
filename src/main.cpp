@@ -2,6 +2,7 @@
 #include <psp2/ctrl.h>
 #include <psp2/touch.h>
 #include <psp2/display.h>
+#include <psp2/gxm.h>
 #include <psp2/kernel/processmgr.h>
 #include <psp2/ime_dialog.h>
 #include <vector>
@@ -15,6 +16,61 @@
 #include "reader_txt.h"
 #include "reader_cbz.h"
 #include "reader_epub.h"
+
+// Matriz ortográfica interna do vita2d (sem setter público).
+extern "C" float _vita2d_ortho_matrix[4 * 4];
+
+static void setOrthoProjection(float width, float height) {
+    // Mesma fórmula de matrix_init_orthographic do vita2d (Y crescente para baixo).
+    float left = 0.0f;
+    float right = width;
+    float bottom = height;
+    float top = 0.0f;
+    float nearPlane = 0.0f;
+    float farPlane = 1.0f;
+
+    _vita2d_ortho_matrix[0x0] = 2.0f / (right - left);
+    _vita2d_ortho_matrix[0x4] = 0.0f;
+    _vita2d_ortho_matrix[0x8] = 0.0f;
+    _vita2d_ortho_matrix[0xC] = -(right + left) / (right - left);
+
+    _vita2d_ortho_matrix[0x1] = 0.0f;
+    _vita2d_ortho_matrix[0x5] = 2.0f / (top - bottom);
+    _vita2d_ortho_matrix[0x9] = 0.0f;
+    _vita2d_ortho_matrix[0xD] = -(top + bottom) / (top - bottom);
+
+    _vita2d_ortho_matrix[0x2] = 0.0f;
+    _vita2d_ortho_matrix[0x6] = 0.0f;
+    _vita2d_ortho_matrix[0xA] = -2.0f / (farPlane - nearPlane);
+    _vita2d_ortho_matrix[0xE] = (farPlane + nearPlane) / (farPlane - nearPlane);
+
+    _vita2d_ortho_matrix[0x3] = 0.0f;
+    _vita2d_ortho_matrix[0x7] = 0.0f;
+    _vita2d_ortho_matrix[0xB] = 0.0f;
+    _vita2d_ortho_matrix[0xF] = 1.0f;
+}
+
+static void setDrawSurfaceSize(float width, float height) {
+    setOrthoProjection(width, height);
+    // API correta do GXM para casar clip/viewport com o alvo atual.
+    // Evita montar sceGxmSetViewport manualmente (ordem xOffset,xScale,yOffset,yScale).
+    sceGxmSetDefaultRegionClipAndViewport(
+        vita2d_get_context(),
+        static_cast<unsigned int>(width) - 1,
+        static_cast<unsigned int>(height) - 1
+    );
+}
+
+static void mapPhysicalTouchToLogical(float physX, float physY, bool rotated, float& outX, float& outY) {
+    if (rotated) {
+        // Rotação 90° horário: inverte o mapeamento para o espaço lógico 544x960.
+        outX = physY;
+        outY = 960.0f - physX;
+    } else {
+        outX = physX;
+        outY = physY;
+    }
+}
 
 enum class AppState {
     MENU,
@@ -173,6 +229,7 @@ int main(int argc, char* argv[]) {
     float readerLastPinchDist = 0.0f;
     bool readerFullscreen = false;
     bool readerRotated = appConfig.readerRotated;
+    UIComponents::setRotated(readerRotated);
 
     // Estado do Diálogo de Exclusão (Popup)
     bool showDeleteConfirm = false;
@@ -254,12 +311,14 @@ int main(int argc, char* argv[]) {
     auto startDrawing = [&]() {
         if (readerRotated && uiRenderTarget) {
             vita2d_start_drawing_advanced(uiRenderTarget, 0);
+            setDrawSurfaceSize(544.0f, 960.0f);
             vita2d_clear_screen();
             if (uiBgTex) {
                 vita2d_draw_texture_tint_scale(uiBgTex, 0, 0, 544.0f, 960.0f, UITheme::Background);
             }
         } else {
             vita2d_start_drawing();
+            setDrawSurfaceSize(960.0f, 544.0f);
         }
     };
     
@@ -267,6 +326,7 @@ int main(int argc, char* argv[]) {
         vita2d_end_drawing();
         if (readerRotated && uiRenderTarget) {
             vita2d_start_drawing();
+            setDrawSurfaceSize(960.0f, 544.0f);
             vita2d_clear_screen();
             // Desenha a textura girada em 90 graus horario. O centro eh a metade da tela do PS Vita
             vita2d_draw_texture_rotate(uiRenderTarget, 480.0f, 272.0f, 1.57079632679f);
@@ -332,15 +392,13 @@ int main(int argc, char* argv[]) {
 
         if (touch.reportNum > 0) {
             // Converte coordenadas do painel (1920x1088) para a tela (960x544)
-            touchX = touch.report[0].x / 2;
-            touchY = touch.report[0].y / 2;
-            if (readerRotated) {
-                // Rotacao 90 graus horario
-                int logX = touchY;
-                int logY = 960 - touchX;
-                touchX = logX;
-                touchY = logY;
-            }
+            float physX = touch.report[0].x / 2.0f;
+            float physY = touch.report[0].y / 2.0f;
+            float logX = 0.0f;
+            float logY = 0.0f;
+            mapPhysicalTouchToLogical(physX, physY, readerRotated, logX, logY);
+            touchX = static_cast<int>(logX);
+            touchY = static_cast<int>(logY);
         }
 
         oldTouchNum = touch.reportNum;
@@ -365,12 +423,14 @@ int main(int argc, char* argv[]) {
 
         // Zoom analogico Y
         if (currentState == AppState::READ_CBZ) {
+            const float zoomCx = UIComponents::getScreenW() * 0.5f;
+            const float zoomCy = UIComponents::getScreenH() * 0.5f;
             if (ry < 100) {
                 float factor = 1.0f + (100.0f - ry) * 0.0005f;
-                readerCbz.addZoom(factor, readerRotated ? 272.0f : 480.0f, readerRotated ? 480.0f : 272.0f);
+                readerCbz.addZoom(factor, zoomCx, zoomCy);
             } else if (ry > 154) {
                 float factor = 1.0f - (ry - 154.0f) * 0.0005f;
-                readerCbz.addZoom(factor, readerRotated ? 272.0f : 480.0f, readerRotated ? 480.0f : 272.0f);
+                readerCbz.addZoom(factor, zoomCx, zoomCy);
             }
         } else if (currentState == AppState::READ_EPUB) {
             if (epubFontTimer > 0) epubFontTimer--;
@@ -388,14 +448,19 @@ int main(int argc, char* argv[]) {
         // Processamento de Gestos Touch unificado para os Leitores (TXT, CBZ, EPUB)
         bool readerTapLeft = false;
         bool readerTapRight = false;
+        const bool inReader =
+            currentState == AppState::READ_TXT ||
+            currentState == AppState::READ_CBZ ||
+            currentState == AppState::READ_EPUB;
 
-        if (currentState != AppState::MENU) {
+        if (inReader) {
+            UIReaderChromeLayout readerChrome = UIComponents::getReaderChromeLayout();
+
             if (touch.reportNum >= 2) {
                 // Multitoque: Zoom por pinça (Pinch-to-zoom)
-                float p0x = touch.report[0].x / 2.0f;
-                float p0y = touch.report[0].y / 2.0f;
-                float p1x = touch.report[1].x / 2.0f;
-                float p1y = touch.report[1].y / 2.0f;
+                float p0x = 0.0f, p0y = 0.0f, p1x = 0.0f, p1y = 0.0f;
+                mapPhysicalTouchToLogical(touch.report[0].x / 2.0f, touch.report[0].y / 2.0f, readerRotated, p0x, p0y);
+                mapPhysicalTouchToLogical(touch.report[1].x / 2.0f, touch.report[1].y / 2.0f, readerRotated, p1x, p1y);
                 float dist = std::hypot(p1x - p0x, p1y - p0y);
                 float midX = (p0x + p1x) / 2.0f;
                 float midY = (p0y + p1y) / 2.0f;
@@ -445,43 +510,33 @@ int main(int argc, char* argv[]) {
             } else if (touchUp && readerIsTouching) {
                 // Ao soltar, se foi apenas clique rápido (sem arraste significativo nem pinça)
                 if (!readerIsDragging && !readerIsPinching) {
-                    // Se não estiver em tela cheia, verifica se tocou nos botões das barras
                     bool handledBarTouch = false;
                     if (!readerFullscreen) {
-                        // Barra Superior: Y < 48
-                        if (readerTouchStartY < 48) {
-                            // Botão de rotação (X: 840..940)
-                            if (readerTouchStartX >= 840 && readerTouchStartX <= 940) {
-                                toggleRotation();
-                                handledBarTouch = true;
-                            }
-                        }
-                        // Barra Inferior (Footer): Y >= 504
-                        else if (readerTouchStartY >= 504) {
-                            // Botão [L] Livro Ant (X: 680..790)
-                            if (readerTouchStartX >= 680 && readerTouchStartX <= 790) {
-                                openPrevBook();
-                                handledBarTouch = true;
-                            }
-                            // Botão [R] Prox Livro (X: 810..920)
-                            else if (readerTouchStartX >= 810 && readerTouchStartX <= 920) {
-                                openNextBook();
-                                handledBarTouch = true;
-                            }
+                        if (readerChrome.rotateBtn.contains(static_cast<float>(readerTouchStartX),
+                                                            static_cast<float>(readerTouchStartY))) {
+                            toggleRotation();
+                            handledBarTouch = true;
+                        } else if (readerChrome.prevBook.contains(static_cast<float>(readerTouchStartX),
+                                                                  static_cast<float>(readerTouchStartY))) {
+                            openPrevBook();
+                            handledBarTouch = true;
+                        } else if (readerChrome.nextBook.contains(static_cast<float>(readerTouchStartX),
+                                                                  static_cast<float>(readerTouchStartY))) {
+                            openNextBook();
+                            handledBarTouch = true;
                         }
                     }
 
                     if (!handledBarTouch) {
-                        // Se não estiver em fullscreen, ignora toques nas bordas das barras (top 48px e bottom 40px)
-                        bool canTurnOrToggle = readerFullscreen || (readerTouchStartY >= 48 && readerTouchStartY < 504);
+                        bool canTurnOrToggle = readerFullscreen ||
+                            (readerTouchStartY >= static_cast<int>(readerChrome.contentTop) &&
+                             readerTouchStartY < static_cast<int>(readerChrome.contentBottom));
                         if (canTurnOrToggle) {
-                            // Tela do PS Vita: 960x544
-                            // 25% esquerda: X < 240 -> Página Anterior
-                            // 25% direita: X > 720 -> Próxima Página
-                            // 50% centro: 240 <= X <= 720 -> Alterna Tela Cheia
-                            if (readerTouchStartX < 240) {
+                            float leftEdge = readerChrome.screenW * 0.25f;
+                            float rightEdge = readerChrome.screenW * 0.75f;
+                            if (readerTouchStartX < static_cast<int>(leftEdge)) {
                                 readerTapLeft = true;
-                            } else if (readerTouchStartX > 720) {
+                            } else if (readerTouchStartX > static_cast<int>(rightEdge)) {
                                 readerTapRight = true;
                             } else {
                                 readerFullscreen = !readerFullscreen;
@@ -533,17 +588,11 @@ int main(int argc, char* argv[]) {
 
                 // Toque nos botões do diálogo
                 if (touchDown) {
-                    float dlgW = 480.0f;
-                    float dlgH = 210.0f;
-                    float dlgX = (960.0f - dlgW) / 2.0f;
-                    float dlgY = (544.0f - dlgH) / 2.0f;
-                    float btnY = dlgY + 145.0f;
-                    float btnW = 195.0f;
-                    float btnH = 42.0f;
-                    float btnYesX = dlgX + 24.0f;
-                    float btnNoX = dlgX + dlgW - 24.0f - btnW;
+                    UIConfirmDialogLayout dlg = UIComponents::getConfirmDialogLayout();
+                    float tx = static_cast<float>(touchX);
+                    float ty = static_cast<float>(touchY);
 
-                    if (touchX >= btnYesX && touchX <= (btnYesX + btnW) && touchY >= btnY && touchY <= (btnY + btnH)) {
+                    if (dlg.yesBtn.contains(tx, ty)) {
                         if (itemToDeleteIndex >= 0 && itemToDeleteIndex < static_cast<int>(visibleItems.size())) {
                             const auto item = visibleItems[itemToDeleteIndex];
                             std::string targetPath = item.fullPath;
@@ -562,7 +611,7 @@ int main(int argc, char* argv[]) {
                         }
                         showDeleteConfirm = false;
                         itemToDeleteIndex = -1;
-                    } else if (touchX >= btnNoX && touchX <= (btnNoX + btnW) && touchY >= btnY && touchY <= (btnY + btnH)) {
+                    } else if (dlg.noBtn.contains(tx, ty)) {
                         showDeleteConfirm = false;
                         itemToDeleteIndex = -1;
                     }
@@ -642,14 +691,15 @@ int main(int argc, char* argv[]) {
                         showDeleteConfirm = true;
                         deleteConfirmYesSelected = false;
                     } else if (!isDraggingY) {
+                        UITopBarLayout topBar = UIComponents::getTopBarLayout();
+                        float sx = static_cast<float>(touchStartX);
+                        float sy = static_cast<float>(touchStartY);
+
                         // Clique simples (sem arraste)
-                        // 1. Campo de Busca (X: 250..490, Y: 14..54)
-                        if (touchStartX >= 250 && touchStartX <= 490 && touchStartY >= 14 && touchStartY <= 54) {
+                        if (topBar.search.contains(sx, sy)) {
                             currentFocus = FocusArea::SEARCH;
                             launch_ime("Pesquisar", searchQuery.c_str());
-                        }
-                        // 2. Botão de Ordenação (X: 500..650, Y: 14..54)
-                        else if (touchStartX >= 500 && touchStartX <= 650 && touchStartY >= 14 && touchStartY <= 54) {
+                        } else if (topBar.sort.contains(sx, sy)) {
                             currentFocus = FocusArea::SORT;
                             int nextSort = (static_cast<int>(currentSort) + 1) % static_cast<int>(SortMode::COUNT);
                             currentSort = static_cast<SortMode>(nextSort);
@@ -661,9 +711,7 @@ int main(int argc, char* argv[]) {
                             scrollOffset = 0;
                             smoothScrollOffset = 0.0f;
                             scrollBarTimer = 120;
-                        }
-                        // 3. Botão de Alternância de Layout (X: 660..770, Y: 14..54)
-                        else if (touchStartX >= 660 && touchStartX <= 770 && touchStartY >= 14 && touchStartY <= 54) {
+                        } else if (topBar.layout.contains(sx, sy)) {
                             currentFocus = FocusArea::LAYOUT;
                             isGridView = !isGridView;
                             appConfig.isGridView = isGridView;
@@ -672,15 +720,11 @@ int main(int argc, char* argv[]) {
                             scrollOffset = 0;
                             smoothScrollOffset = 0.0f;
                             scrollBarTimer = 120;
-                        }
-                        // 4. Botão de Configurações (X: 780..870, Y: 14..54)
-                        else if (touchStartX >= 780 && touchStartX <= 870 && touchStartY >= 14 && touchStartY <= 54) {
+                        } else if (topBar.settings.contains(sx, sy)) {
                             currentFocus = FocusArea::SETTINGS;
                             currentState = AppState::SETTINGS;
                             settingsSelectedIndex = 0;
-                        }
-                        // 5. Botão de Refresh (X: 880..935, Y: 14..54)
-                        else if (touchStartX >= 880 && touchStartX <= 935 && touchStartY >= 14 && touchStartY <= 54) {
+                        } else if (topBar.refresh.contains(sx, sy)) {
                             currentFocus = FocusArea::REFRESH;
                             allItems = FileBrowser::scanLibrary();
                             FileBrowser::sortItems(allItems, currentSort);
@@ -689,9 +733,7 @@ int main(int argc, char* argv[]) {
                             scrollOffset = 0;
                             smoothScrollOffset = 0.0f;
                             scrollBarTimer = 120;
-                        }
-                        // 6. Clique em Item: Abre o item imediatamente
-                        else if (initialTouchItemIndex >= 0 && initialTouchItemIndex < static_cast<int>(visibleItems.size())) {
+                        } else if (initialTouchItemIndex >= 0 && initialTouchItemIndex < static_cast<int>(visibleItems.size())) {
                             currentFocus = FocusArea::CONTENT;
                             selectedIndex = initialTouchItemIndex;
                             openItem(initialTouchItemIndex);
@@ -909,8 +951,8 @@ int main(int argc, char* argv[]) {
 
                         float cardTop = y;
                         float cardBottom = y + cardHeight;
-                        float clipBottom = readerRotated ? 920.0f : 504.0f;
-                        float clipFadeBottom = readerRotated ? 912.0f : 496.0f;
+                        float clipBottom = UIComponents::getScreenH() - 40.0f;
+                        float clipFadeBottom = clipBottom - 8.0f;
                         if (cardBottom <= 68.0f || cardTop >= clipBottom) {
                             continue;
                         }
@@ -959,8 +1001,8 @@ int main(int argc, char* argv[]) {
 
                             float cardTop = y;
                             float cardBottom = y + cardH;
-                            float clipBottom = readerRotated ? 920.0f : 504.0f;
-                            float clipFadeBottom = readerRotated ? 912.0f : 496.0f;
+                            float clipBottom = UIComponents::getScreenH() - 40.0f;
+                            float clipFadeBottom = clipBottom - 8.0f;
                             if (cardBottom <= 68.0f || cardTop >= clipBottom) {
                                 continue;
                             }
@@ -1055,20 +1097,17 @@ int main(int argc, char* argv[]) {
 
             // Touch Gestures na tela de Configurações
             if (touchDown) {
-                float sec1Y = 88.0f + 26.0f;
-                float rowH = 46.0f;
-                float sec2Y = sec1Y + rowH * 2.0f + 50.0f;
+                UISettingsLayout settingsLayout = UIComponents::getSettingsLayout();
+                float tx = static_cast<float>(touchX);
+                float ty = static_cast<float>(touchY);
 
-                // Item 0
-                if (touchStartY >= sec1Y && touchStartY < sec1Y + rowH) {
+                if (settingsLayout.item0.contains(tx, ty)) {
                     settingsSelectedIndex = 0;
                     appConfig.isGridView = !appConfig.isGridView;
                     isGridView = appConfig.isGridView;
                     selectedIndex = 0; scrollOffset = 0; smoothScrollOffset = 0.0f;
                     ConfigManager::getInstance().save();
-                }
-                // Item 1
-                else if (touchStartY >= sec1Y + rowH && touchStartY < sec1Y + rowH * 2.0f) {
+                } else if (settingsLayout.item1.contains(tx, ty)) {
                     settingsSelectedIndex = 1;
                     int count = static_cast<int>(SortMode::COUNT);
                     int cur = (static_cast<int>(appConfig.sortMode) + 1) % count;
@@ -1078,9 +1117,7 @@ int main(int argc, char* argv[]) {
                     visibleItems = FileBrowser::filterItems(allItems, searchQuery);
                     selectedIndex = 0; scrollOffset = 0; smoothScrollOffset = 0.0f;
                     ConfigManager::getInstance().save();
-                }
-                // Item 2
-                else if (touchStartY >= sec2Y && touchStartY < sec2Y + rowH) {
+                } else if (settingsLayout.item2.contains(tx, ty)) {
                     settingsSelectedIndex = 2;
                     appConfig.readerRotated = !appConfig.readerRotated;
                     readerRotated = appConfig.readerRotated;
@@ -1089,17 +1126,13 @@ int main(int argc, char* argv[]) {
                     readerCbz.setRotated(readerRotated);
                     readerEpub.setRotated(readerRotated);
                     ConfigManager::getInstance().save();
-                }
-                // Item 3
-                else if (touchStartY >= sec2Y + rowH && touchStartY < sec2Y + rowH * 2.0f) {
+                } else if (settingsLayout.item3.contains(tx, ty)) {
                     settingsSelectedIndex = 3;
                     appConfig.showPageNumbers = !appConfig.showPageNumbers;
                     ConfigManager::getInstance().save();
-                }
-                // Item 4
-                else if (touchStartY >= sec2Y + rowH * 2.0f && touchStartY < sec2Y + rowH * 3.0f) {
+                } else if (settingsLayout.item4.contains(tx, ty)) {
                     settingsSelectedIndex = 4;
-                    if (touchStartX > 600) {
+                    if (tx > settingsLayout.fontValueSplitX) {
                         if (appConfig.epubFontSize < 44) appConfig.epubFontSize += 2;
                     } else {
                         if (appConfig.epubFontSize > 14) appConfig.epubFontSize -= 2;
