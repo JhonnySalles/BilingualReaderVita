@@ -45,6 +45,8 @@ void ConfigManager::load() {
             if (sz >= 12 && sz <= 48) {
                 m_config.epubFontSize = sz;
             }
+        } else if (key == "theme") {
+            m_config.theme = ThemeManager::fromKey(val);
         }
     }
     file.close();
@@ -63,6 +65,7 @@ void ConfigManager::save() {
     file << "reader_rotated=" << (m_config.readerRotated ? "1" : "0") << "\n";
     file << "show_page_numbers=" << (m_config.showPageNumbers ? "1" : "0") << "\n";
     file << "epub_font_size=" << m_config.epubFontSize << "\n";
+    file << "theme=" << ThemeManager::key(m_config.theme) << "\n";
 
     file.close();
 }

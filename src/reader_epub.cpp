@@ -259,7 +259,7 @@ void ReaderEPUB::render(vita2d_pgf* font, bool fullscreen) {
     // Fundo elegante para livro
     float screenW = isRotated ? 544.0f : 960.0f; 
     float screenH = isRotated ? 960.0f : 544.0f;
-    vita2d_draw_rectangle(0, 0, screenW, screenH, RGBA8(24, 26, 36, 255));
+    vita2d_draw_rectangle(0, 0, screenW, screenH, UITheme::Background);
 
     // Desenha a página renderizada centralizada na tela com escala GPU
     if (pageTexture) {

@@ -185,6 +185,9 @@ int main(int argc, char* argv[]) {
     ConfigManager::getInstance().load();
     AppConfig& appConfig = ConfigManager::getInstance().getConfig();
 
+    // Aplica o tema salvo (ou padrão NVIDIA Green)
+    ThemeManager::apply(appConfig.theme);
+
     // Habilita amostragem do Touch Frontal
     sceTouchSetSamplingState(SCE_TOUCH_PORT_FRONT, SCE_TOUCH_SAMPLING_STATE_START);
 
@@ -194,6 +197,11 @@ int main(int argc, char* argv[]) {
     AppState currentState = AppState::MENU;
     FocusArea currentFocus = FocusArea::CONTENT;
     int settingsSelectedIndex = 0;
+    int settingsThemeCursor = static_cast<int>(appConfig.theme);
+    float settingsScrollY = 0.0f;
+    float settingsSmoothScrollY = 0.0f;
+    float settingsThemeScrollX = 0.0f;
+    float settingsSmoothThemeScrollX = 0.0f;
 
     std::vector<LibraryItem> allItems = FileBrowser::scanLibrary();
     SortMode currentSort = appConfig.sortMode;
@@ -553,8 +561,9 @@ int main(int argc, char* argv[]) {
 
         if (currentState == AppState::MENU) {
             const int gridCols = readerRotated ? 2 : 3;
+            const int gridVisibleRows = readerRotated ? 4 : 2;
+            const int gridVisibleCount = gridVisibleRows * gridCols;
             const int listVisibleCount = readerRotated ? 10 : 5;
-            const int gridVisibleCount = readerRotated ? 10 : 6;
 
             // GESTÃO DO POPUP DE CONFIRMAÇÃO DE DELEÇÃO
             if (showDeleteConfirm) {
@@ -574,8 +583,14 @@ int main(int argc, char* argv[]) {
                         if (selectedIndex >= static_cast<int>(visibleItems.size())) {
                             selectedIndex = std::max(0, static_cast<int>(visibleItems.size()) - 1);
                         }
-                        int maxOffset = !isGridView ? std::max(0, static_cast<int>(visibleItems.size()) - listVisibleCount)
-                                                    : std::max(0, static_cast<int>(visibleItems.size()) - gridVisibleCount);
+                        int maxOffset = 0;
+                        if (!isGridView) {
+                            maxOffset = std::max(0, static_cast<int>(visibleItems.size()) - listVisibleCount);
+                        } else {
+                            int totalRows = (static_cast<int>(visibleItems.size()) + gridCols - 1) / gridCols;
+                            int maxRowOffset = std::max(0, totalRows - gridVisibleRows);
+                            maxOffset = maxRowOffset * gridCols;
+                        }
                         if (scrollOffset > maxOffset) scrollOffset = maxOffset;
                     }
                     showDeleteConfirm = false;
@@ -605,8 +620,14 @@ int main(int argc, char* argv[]) {
                             if (selectedIndex >= static_cast<int>(visibleItems.size())) {
                                 selectedIndex = std::max(0, static_cast<int>(visibleItems.size()) - 1);
                             }
-                            int maxOffset = !isGridView ? std::max(0, static_cast<int>(visibleItems.size()) - listVisibleCount)
-                                                        : std::max(0, static_cast<int>(visibleItems.size()) - gridVisibleCount);
+                            int maxOffset = 0;
+                            if (!isGridView) {
+                                maxOffset = std::max(0, static_cast<int>(visibleItems.size()) - listVisibleCount);
+                            } else {
+                                int totalRows = (static_cast<int>(visibleItems.size()) + gridCols - 1) / gridCols;
+                                int maxRowOffset = std::max(0, totalRows - gridVisibleRows);
+                                maxOffset = maxRowOffset * gridCols;
+                            }
                             if (scrollOffset > maxOffset) scrollOffset = maxOffset;
                         }
                         showDeleteConfirm = false;
@@ -674,8 +695,14 @@ int main(int argc, char* argv[]) {
                         int steps = static_cast<int>(deltaY / stepHeight);
                         int newOffset = !isGridView ? (dragStartOffset - steps) : (dragStartOffset - steps * gridCols);
                         
-                        int maxOffset = !isGridView ? std::max(0, static_cast<int>(visibleItems.size()) - listVisibleCount)
-                                                    : std::max(0, static_cast<int>(visibleItems.size()) - gridVisibleCount);
+                        int maxOffset = 0;
+                        if (!isGridView) {
+                            maxOffset = std::max(0, static_cast<int>(visibleItems.size()) - listVisibleCount);
+                        } else {
+                            int totalRows = (static_cast<int>(visibleItems.size()) + gridCols - 1) / gridCols;
+                            int maxRowOffset = std::max(0, totalRows - gridVisibleRows);
+                            maxOffset = maxRowOffset * gridCols;
+                        }
                         if (newOffset < 0) newOffset = 0;
                         if (newOffset > maxOffset) newOffset = maxOffset;
                         scrollOffset = newOffset;
@@ -755,6 +782,7 @@ int main(int argc, char* argv[]) {
                                 selectedIndex -= gridCols;
                                 if (selectedIndex < scrollOffset) {
                                     scrollOffset -= gridCols;
+                                    if (scrollOffset < 0) scrollOffset = 0;
                                     scrollBarTimer = 120;
                                 }
                             } else {
@@ -766,6 +794,10 @@ int main(int argc, char* argv[]) {
                                 selectedIndex += gridCols;
                                 if (selectedIndex >= scrollOffset + gridVisibleCount) {
                                     scrollOffset += gridCols;
+                                    int totalRows = (static_cast<int>(visibleItems.size()) + gridCols - 1) / gridCols;
+                                    int maxRowOffset = std::max(0, totalRows - gridVisibleRows);
+                                    int maxOffset = maxRowOffset * gridCols;
+                                    if (scrollOffset > maxOffset) scrollOffset = maxOffset;
                                     scrollBarTimer = 120;
                                 }
                             }
@@ -915,18 +947,6 @@ int main(int argc, char* argv[]) {
             startDrawing();
             vita2d_clear_screen();
 
-            UIComponents::drawTopBar(
-                searchQuery,
-                ime_active != 0,
-                currentSort,
-                isGridView,
-                currentFocus == FocusArea::SEARCH,
-                currentFocus == FocusArea::SORT,
-                currentFocus == FocusArea::LAYOUT,
-                currentFocus == FocusArea::SETTINGS,
-                currentFocus == FocusArea::REFRESH
-            );
-
             if (visibleItems.empty()) {
                 UIComponents::drawRoundedBox(180, 200, 600, 130, 12.0f, UITheme::Surface);
                 if (pgf) {
@@ -969,9 +989,6 @@ int main(int argc, char* argv[]) {
                         float cardListW = readerRotated ? 480.0f : 896.0f;
                         UIComponents::drawListCard(32.0f, y, cardListW, cardHeight, isSelected, item, cardAlpha);
                     }
-
-                    // Barra de rolagem animada com fade
-                    UIComponents::drawLibraryScrollBar(smoothScrollOffset, static_cast<int>(visibleItems.size()), listVisibleCount, false, scrollBarAlpha);
 
                 } else {
                     // Renderização em Grade com Animação e Fade nos Extremos
@@ -1019,13 +1036,33 @@ int main(int argc, char* argv[]) {
                             UIComponents::drawGridCard(x, y, cardW, cardH, isSelected, item, cardAlpha);
                         }
                     }
-
-                    // Barra de rolagem animada com fade
-                    UIComponents::drawLibraryScrollBar(smoothScrollOffset, static_cast<int>(visibleItems.size()), gridVisibleCount, true, scrollBarAlpha);
                 }
             }
 
+            // Barra Superior desenhada por cima do conteúdo (Z-Order Top)
+            UIComponents::drawTopBar(
+                searchQuery,
+                ime_active != 0,
+                currentSort,
+                isGridView,
+                currentFocus == FocusArea::SEARCH,
+                currentFocus == FocusArea::SORT,
+                currentFocus == FocusArea::LAYOUT,
+                currentFocus == FocusArea::SETTINGS,
+                currentFocus == FocusArea::REFRESH
+            );
+
+            // Barra Inferior / Rodapé desenhado por cima do conteúdo (Z-Order Top)
             UIComponents::drawFooter("D-Pad: Navegar | X: Abrir/Acao | []: Favorito | /\\: Recarregar");
+
+            // Barra de rolagem animada com fade
+            if (!visibleItems.empty()) {
+                if (!isGridView) {
+                    UIComponents::drawLibraryScrollBar(smoothScrollOffset, static_cast<int>(visibleItems.size()), listVisibleCount, false, scrollBarAlpha);
+                } else {
+                    UIComponents::drawLibraryScrollBar(smoothScrollOffset, static_cast<int>(visibleItems.size()), gridVisibleCount, true, scrollBarAlpha);
+                }
+            }
 
             if (showDeleteConfirm && itemToDeleteIndex >= 0 && itemToDeleteIndex < static_cast<int>(visibleItems.size())) {
                 std::string msg = "Deseja excluir: " + visibleItems[itemToDeleteIndex].filename + "?";
@@ -1036,7 +1073,8 @@ int main(int argc, char* argv[]) {
 
 
         } else if (currentState == AppState::SETTINGS) {
-            const int totalSettingsItems = 5;
+            const int totalSettingsItems = 6;
+            const int themeCount = static_cast<int>(ThemeId::COUNT);
 
             // Navegação Vertical (D-pad Cima / Baixo)
             if (pressed & SCE_CTRL_UP) {
@@ -1050,16 +1088,39 @@ int main(int argc, char* argv[]) {
             bool changePrev = (pressed & SCE_CTRL_LEFT);
             bool changeNext = (pressed & (SCE_CTRL_RIGHT | SCE_CTRL_CROSS));
 
-            if (changePrev || changeNext) {
+            if (settingsSelectedIndex == 0) {
+                // Item 0: Seleção de Tema (Cards Horizontais)
+                if (pressed & SCE_CTRL_LEFT) {
+                    if (settingsThemeCursor > 0) {
+                        settingsThemeCursor--;
+                        appConfig.theme = static_cast<ThemeId>(settingsThemeCursor);
+                        ThemeManager::apply(appConfig.theme);
+                        ConfigManager::getInstance().save();
+                    }
+                }
+                if (pressed & SCE_CTRL_RIGHT) {
+                    if (settingsThemeCursor < themeCount - 1) {
+                        settingsThemeCursor++;
+                        appConfig.theme = static_cast<ThemeId>(settingsThemeCursor);
+                        ThemeManager::apply(appConfig.theme);
+                        ConfigManager::getInstance().save();
+                    }
+                }
+                if (pressed & SCE_CTRL_CROSS) {
+                    appConfig.theme = static_cast<ThemeId>(settingsThemeCursor);
+                    ThemeManager::apply(appConfig.theme);
+                    ConfigManager::getInstance().save();
+                }
+            } else if (changePrev || changeNext) {
                 switch (settingsSelectedIndex) {
-                    case 0: // Modo de Exibição (Lista / Grade)
+                    case 1: // Modo de Exibição (Lista / Grade)
                         appConfig.isGridView = !appConfig.isGridView;
                         isGridView = appConfig.isGridView;
                         selectedIndex = 0;
                         scrollOffset = 0;
                         smoothScrollOffset = 0.0f;
                         break;
-                    case 1: { // Ordenação Padrão
+                    case 2: { // Ordenação Padrão
                         int count = static_cast<int>(SortMode::COUNT);
                         int cur = static_cast<int>(appConfig.sortMode);
                         if (changeNext) cur = (cur + 1) % count;
@@ -1073,7 +1134,7 @@ int main(int argc, char* argv[]) {
                         smoothScrollOffset = 0.0f;
                         break;
                     }
-                    case 2: // Orientação do Leitor
+                    case 3: // Orientação do Leitor
                         appConfig.readerRotated = !appConfig.readerRotated;
                         readerRotated = appConfig.readerRotated;
                         UIComponents::setRotated(readerRotated);
@@ -1081,10 +1142,10 @@ int main(int argc, char* argv[]) {
                         readerCbz.setRotated(readerRotated);
                         readerEpub.setRotated(readerRotated);
                         break;
-                    case 3: // Exibir Número de Páginas
+                    case 4: // Exibir Número de Páginas
                         appConfig.showPageNumbers = !appConfig.showPageNumbers;
                         break;
-                    case 4: // Tamanho de Fonte Padrão (EPUB)
+                    case 5: // Tamanho de Fonte Padrão (EPUB)
                         if (changeNext) {
                             if (appConfig.epubFontSize < 44) appConfig.epubFontSize += 2;
                         } else {
@@ -1095,49 +1156,92 @@ int main(int argc, char* argv[]) {
                 ConfigManager::getInstance().save();
             }
 
+            // Animação de Scroll Vertical na tela de configurações (acompanha o item focado)
+            if (settingsSelectedIndex == 0) {
+                settingsScrollY = 0.0f;
+            } else if (settingsSelectedIndex >= 3) {
+                float screenHeight = UIComponents::getScreenH();
+                if (screenHeight <= 544.0f) {
+                    // No modo horizontal, rola para dar visibilidade aos itens 3, 4 e 5
+                    settingsScrollY = (settingsSelectedIndex - 2) * 52.0f;
+                } else {
+                    settingsScrollY = 0.0f;
+                }
+            } else {
+                settingsScrollY = 0.0f;
+            }
+
+            // Animação de Scroll Horizontal nos cards de tema (centraliza o card com foco)
+            float cardStep = 92.0f + 12.0f; // cardW + gap
+            float visibleAreaW = UIComponents::getScreenW() - 72.0f;
+            float targetThemeScrollX = std::max(0.0f, (settingsThemeCursor * cardStep) - (visibleAreaW / 2.0f) + (cardStep / 2.0f));
+            float maxThemeScrollX = std::max(0.0f, (themeCount * cardStep) - visibleAreaW);
+            if (targetThemeScrollX > maxThemeScrollX) targetThemeScrollX = maxThemeScrollX;
+            settingsThemeScrollX = targetThemeScrollX;
+
+            settingsSmoothScrollY += (settingsScrollY - settingsSmoothScrollY) * 0.22f;
+            settingsSmoothThemeScrollX += (settingsThemeScrollX - settingsSmoothThemeScrollX) * 0.22f;
+
             // Touch Gestures na tela de Configurações
             if (touchDown) {
-                UISettingsLayout settingsLayout = UIComponents::getSettingsLayout();
+                UISettingsLayout settingsLayout = UIComponents::getSettingsLayout(settingsSmoothScrollY);
                 float tx = static_cast<float>(touchX);
                 float ty = static_cast<float>(touchY);
 
-                if (settingsLayout.item0.contains(tx, ty)) {
-                    settingsSelectedIndex = 0;
-                    appConfig.isGridView = !appConfig.isGridView;
-                    isGridView = appConfig.isGridView;
-                    selectedIndex = 0; scrollOffset = 0; smoothScrollOffset = 0.0f;
-                    ConfigManager::getInstance().save();
-                } else if (settingsLayout.item1.contains(tx, ty)) {
-                    settingsSelectedIndex = 1;
-                    int count = static_cast<int>(SortMode::COUNT);
-                    int cur = (static_cast<int>(appConfig.sortMode) + 1) % count;
-                    appConfig.sortMode = static_cast<SortMode>(cur);
-                    currentSort = appConfig.sortMode;
-                    FileBrowser::sortItems(allItems, currentSort);
-                    visibleItems = FileBrowser::filterItems(allItems, searchQuery);
-                    selectedIndex = 0; scrollOffset = 0; smoothScrollOffset = 0.0f;
-                    ConfigManager::getInstance().save();
-                } else if (settingsLayout.item2.contains(tx, ty)) {
-                    settingsSelectedIndex = 2;
-                    appConfig.readerRotated = !appConfig.readerRotated;
-                    readerRotated = appConfig.readerRotated;
-                    UIComponents::setRotated(readerRotated);
-                    readerTxt.setRotated(readerRotated, pgf);
-                    readerCbz.setRotated(readerRotated);
-                    readerEpub.setRotated(readerRotated);
-                    ConfigManager::getInstance().save();
-                } else if (settingsLayout.item3.contains(tx, ty)) {
-                    settingsSelectedIndex = 3;
-                    appConfig.showPageNumbers = !appConfig.showPageNumbers;
-                    ConfigManager::getInstance().save();
-                } else if (settingsLayout.item4.contains(tx, ty)) {
-                    settingsSelectedIndex = 4;
-                    if (tx > settingsLayout.fontValueSplitX) {
-                        if (appConfig.epubFontSize < 44) appConfig.epubFontSize += 2;
-                    } else {
-                        if (appConfig.epubFontSize > 14) appConfig.epubFontSize -= 2;
+                // Toque nos Cards de Tema
+                bool hitThemeCard = false;
+                for (int i = 0; i < themeCount; i++) {
+                    UIRect cr = settingsLayout.getThemeCardRect(i, settingsSmoothThemeScrollX);
+                    if (cr.contains(tx, ty)) {
+                        settingsSelectedIndex = 0;
+                        settingsThemeCursor = i;
+                        appConfig.theme = static_cast<ThemeId>(i);
+                        ThemeManager::apply(appConfig.theme);
+                        ConfigManager::getInstance().save();
+                        hitThemeCard = true;
+                        break;
                     }
-                    ConfigManager::getInstance().save();
+                }
+
+                if (!hitThemeCard) {
+                    if (settingsLayout.item1.contains(tx, ty)) {
+                        settingsSelectedIndex = 1;
+                        appConfig.isGridView = !appConfig.isGridView;
+                        isGridView = appConfig.isGridView;
+                        selectedIndex = 0; scrollOffset = 0; smoothScrollOffset = 0.0f;
+                        ConfigManager::getInstance().save();
+                    } else if (settingsLayout.item2.contains(tx, ty)) {
+                        settingsSelectedIndex = 2;
+                        int count = static_cast<int>(SortMode::COUNT);
+                        int cur = (static_cast<int>(appConfig.sortMode) + 1) % count;
+                        appConfig.sortMode = static_cast<SortMode>(cur);
+                        currentSort = appConfig.sortMode;
+                        FileBrowser::sortItems(allItems, currentSort);
+                        visibleItems = FileBrowser::filterItems(allItems, searchQuery);
+                        selectedIndex = 0; scrollOffset = 0; smoothScrollOffset = 0.0f;
+                        ConfigManager::getInstance().save();
+                    } else if (settingsLayout.item3.contains(tx, ty)) {
+                        settingsSelectedIndex = 3;
+                        appConfig.readerRotated = !appConfig.readerRotated;
+                        readerRotated = appConfig.readerRotated;
+                        UIComponents::setRotated(readerRotated);
+                        readerTxt.setRotated(readerRotated, pgf);
+                        readerCbz.setRotated(readerRotated);
+                        readerEpub.setRotated(readerRotated);
+                        ConfigManager::getInstance().save();
+                    } else if (settingsLayout.item4.contains(tx, ty)) {
+                        settingsSelectedIndex = 4;
+                        appConfig.showPageNumbers = !appConfig.showPageNumbers;
+                        ConfigManager::getInstance().save();
+                    } else if (settingsLayout.item5.contains(tx, ty)) {
+                        settingsSelectedIndex = 5;
+                        if (tx > settingsLayout.fontValueSplitX) {
+                            if (appConfig.epubFontSize < 44) appConfig.epubFontSize += 2;
+                        } else {
+                            if (appConfig.epubFontSize > 14) appConfig.epubFontSize -= 2;
+                        }
+                        ConfigManager::getInstance().save();
+                    }
                 }
             }
 
@@ -1150,7 +1254,7 @@ int main(int argc, char* argv[]) {
 
             startDrawing();
             vita2d_clear_screen();
-            UIComponents::drawSettingsScreen(settingsSelectedIndex, appConfig);
+            UIComponents::drawSettingsScreen(settingsSelectedIndex, appConfig, settingsSmoothScrollY, settingsSmoothThemeScrollX, settingsThemeCursor);
             endDrawing();
 
         } else if (currentState == AppState::READ_TXT) {

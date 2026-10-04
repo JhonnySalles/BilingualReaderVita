@@ -1,6 +1,7 @@
 #pragma once
 #include <string>
 #include "file_browser.h"
+#include "theme_manager.h"
 
 struct AppConfig {
     SortMode sortMode = SortMode::NAME;
@@ -8,6 +9,7 @@ struct AppConfig {
     bool readerRotated = false;
     bool showPageNumbers = true;
     int epubFontSize = 24;
+    ThemeId theme = ThemeId::DEFAULT;
 };
 
 class ConfigManager {

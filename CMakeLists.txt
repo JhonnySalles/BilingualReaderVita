@@ -48,6 +48,7 @@ set(SOURCES
   src/main.cpp
   src/image_loader.cpp
   src/ui_components.cpp
+  src/theme_manager.cpp
   src/config_manager.cpp
   src/file_browser.cpp
   src/file_utils.cpp

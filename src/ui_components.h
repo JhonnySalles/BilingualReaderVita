@@ -39,24 +39,44 @@ struct UIConfirmDialogLayout {
 };
 
 struct UISettingsLayout {
-    UIRect item0;
-    UIRect item1;
-    UIRect item2;
-    UIRect item3;
-    UIRect item4;
+    UIRect themeRow;
+    UIRect item0;   // Tema (Horizontal Cards container)
+    UIRect item1;   // Modo de Exibição
+    UIRect item2;   // Ordenação Padrão
+    UIRect item3;   // Orientação do Leitor
+    UIRect item4;   // Exibir Número de Páginas
+    UIRect item5;   // Tamanho de Fonte Padrão
     float fontValueSplitX = 600.0f;
+    float contentTotalH = 500.0f;
+
+    UIRect getThemeCardRect(int themeIndex, float scrollX = 0.0f) const {
+        float cardW = 92.0f;
+        float cardH = 80.0f;
+        float gap = 12.0f;
+        float startX = 36.0f - scrollX;
+        return {startX + themeIndex * (cardW + gap), item0.y + 4.0f, cardW, cardH};
+    }
 };
 
 namespace UITheme {
-    constexpr unsigned int Background      = RGBA8(18, 20, 29, 255);
-    constexpr unsigned int Surface         = RGBA8(28, 32, 46, 255);
-    constexpr unsigned int SurfaceActive   = RGBA8(42, 48, 70, 255);
-    constexpr unsigned int Primary         = RGBA8(99, 102, 241, 255);   // Indigo
-    constexpr unsigned int Secondary       = RGBA8(139, 92, 246, 255);  // Violeta
-    constexpr unsigned int TextPrimary     = RGBA8(243, 244, 246, 255); // Branco suave
-    constexpr unsigned int TextSecondary   = RGBA8(156, 163, 175, 255); // Cinza
-    
-    // Badges por tipo
+    // Cores do Tema ativo (atualizadas via ThemeManager::apply)
+    extern unsigned int Background;
+    extern unsigned int TopBar;
+    extern unsigned int Surface;
+    extern unsigned int SurfaceActive;
+    extern unsigned int Divider;
+    extern unsigned int Primary;
+    extern unsigned int OnPrimary;
+    extern unsigned int Secondary;
+    extern unsigned int TextPrimary;
+    extern unsigned int TextSecondary;
+    extern unsigned int SearchBarBg;
+    extern unsigned int SearchBarActive;
+    extern unsigned int ProgressBarBg;
+    extern unsigned int CoverBg;
+    extern unsigned int CoverBgActive;
+
+    // Badges por tipo (Fixas para manter identidade de cada extensão)
     constexpr unsigned int BadgeTXT        = RGBA8(16, 185, 129, 255);  // Esmeralda
     constexpr unsigned int BadgeCBZ        = RGBA8(245, 158, 11, 255);  // Âmbar
     constexpr unsigned int BadgeZIP        = RGBA8(217, 119, 6, 255);   // Laranja escuro
@@ -68,11 +88,6 @@ namespace UITheme {
     constexpr unsigned int Badge7Z         = RGBA8(126, 34, 206, 255);  // Roxo escuro
     constexpr unsigned int BadgeEPUB       = RGBA8(59, 130, 246, 255);  // Azul
     constexpr unsigned int FavoriteGold    = RGBA8(250, 204, 21, 255);  // Dourado
-    constexpr unsigned int TopBar          = RGBA8(13, 15, 22, 255);
-    constexpr unsigned int SearchBarBg     = RGBA8(30, 35, 52, 255);
-    constexpr unsigned int SearchBarActive = RGBA8(45, 52, 78, 255);
-    constexpr unsigned int ProgressBarBg   = RGBA8(35, 39, 58, 200);
-    constexpr unsigned int ProgressBarFill = RGBA8(99, 102, 241, 255);
 }
 
 class UIComponents {
@@ -87,7 +102,7 @@ public:
     static UITopBarLayout getTopBarLayout();
     static UIReaderChromeLayout getReaderChromeLayout();
     static UIConfirmDialogLayout getConfirmDialogLayout();
-    static UISettingsLayout getSettingsLayout();
+    static UISettingsLayout getSettingsLayout(float scrollY = 0.0f);
 
     static void drawRoundedBox(float x, float y, float w, float h, float radius, unsigned int color);
     
@@ -104,8 +119,8 @@ public:
         bool isRefreshSelected
     );
 
-    // Tela de Configurações (Estilo PS Vita Nativo)
-    static void drawSettingsScreen(int selectedItemIndex, const struct AppConfig& config);
+    // Tela de Configurações (Estilo PS Vita Nativo) com rolagem vertical e horizontal nos temas
+    static void drawSettingsScreen(int selectedItemIndex, const struct AppConfig& config, float scrollY = 0.0f, float themeScrollX = 0.0f, int themeCursor = 0);
 
     // Utilitário para cálculo de transparência (Alpha Blending)
     static inline unsigned int applyAlpha(unsigned int color, float alpha) {
