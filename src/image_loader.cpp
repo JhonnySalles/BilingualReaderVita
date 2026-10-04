@@ -210,4 +210,180 @@ vita2d_texture* loadTextureFromBuffer(const unsigned char* buffer, size_t size) 
     return tex;
 }
 
+vita2d_texture* loadThumbnailFromFile(const std::string& filePath, int maxW, int maxH) {
+    if (filePath.empty()) return nullptr;
+
+    fz_context* ctx = getFzContext();
+    if (!ctx) return nullptr;
+
+    fz_document* doc = nullptr;
+    fz_page* page = nullptr;
+    fz_pixmap* pix = nullptr;
+    vita2d_texture* tex = nullptr;
+
+    fz_try(ctx) {
+        doc = fz_open_document(ctx, filePath.c_str());
+        if (doc) {
+            int pageCount = fz_count_pages(ctx, doc);
+            if (pageCount > 0) {
+                page = fz_load_page(ctx, doc, 0);
+                if (page) {
+                    fz_rect bounds = fz_bound_page(ctx, page);
+                    float pageW = bounds.x1 - bounds.x0;
+                    float pageH = bounds.y1 - bounds.y0;
+
+                    if (pageW > 0.0f && pageH > 0.0f) {
+                        float scale = std::min((float)maxW / pageW, (float)maxH / pageH);
+                        if (scale > 1.0f) scale = 1.0f;
+                        if (scale < 0.01f) scale = 0.01f;
+
+                        fz_matrix ctm = fz_scale(scale, scale);
+                        fz_irect ibounds = fz_round_rect(fz_transform_rect(bounds, ctm));
+
+                        fz_colorspace* cs = fz_device_rgb(ctx);
+                        pix = fz_new_pixmap_with_bbox(ctx, cs, ibounds, NULL, 1);
+                        fz_clear_pixmap(ctx, pix);
+
+                        fz_device* dev = fz_new_draw_device(ctx, ctm, pix);
+                        fz_run_page(ctx, page, dev, fz_identity, NULL);
+                        fz_close_device(ctx, dev);
+                        fz_drop_device(ctx, dev);
+
+                        tex = createTextureFromPixmap(ctx, pix);
+                    }
+                    fz_drop_page(ctx, page);
+                    page = nullptr;
+                }
+            }
+            fz_drop_document(ctx, doc);
+            doc = nullptr;
+        }
+    }
+    fz_catch(ctx) {
+        if (page) fz_drop_page(ctx, page);
+        if (doc) fz_drop_document(ctx, doc);
+        if (pix) fz_drop_pixmap(ctx, pix);
+        return nullptr;
+    }
+
+    if (pix) {
+        fz_drop_pixmap(ctx, pix);
+    }
+
+    return tex;
+}
+
+vita2d_texture* loadThumbnailFromBuffer(const unsigned char* buffer, size_t size, int maxW, int maxH) {
+    if (!buffer || size == 0) return nullptr;
+
+    fz_context* ctx = getFzContext();
+    if (!ctx) return nullptr;
+
+    fz_buffer* fzbuf = nullptr;
+    fz_stream* stm = nullptr;
+    fz_document* doc = nullptr;
+    fz_page* page = nullptr;
+    fz_pixmap* pix = nullptr;
+    vita2d_texture* tex = nullptr;
+
+    fz_try(ctx) {
+        fzbuf = fz_new_buffer_from_copied_data(ctx, buffer, size);
+        stm = fz_open_buffer(ctx, fzbuf);
+        doc = fz_open_document_with_stream(ctx, ".jpg", stm);
+
+        if (doc) {
+            int pageCount = fz_count_pages(ctx, doc);
+            if (pageCount > 0) {
+                page = fz_load_page(ctx, doc, 0);
+                if (page) {
+                    fz_rect bounds = fz_bound_page(ctx, page);
+                    float pageW = bounds.x1 - bounds.x0;
+                    float pageH = bounds.y1 - bounds.y0;
+
+                    if (pageW > 0.0f && pageH > 0.0f) {
+                        float scale = std::min((float)maxW / pageW, (float)maxH / pageH);
+                        if (scale > 1.0f) scale = 1.0f;
+                        if (scale < 0.01f) scale = 0.01f;
+
+                        fz_matrix ctm = fz_scale(scale, scale);
+                        fz_irect ibounds = fz_round_rect(fz_transform_rect(bounds, ctm));
+
+                        fz_colorspace* cs = fz_device_rgb(ctx);
+                        pix = fz_new_pixmap_with_bbox(ctx, cs, ibounds, NULL, 1);
+                        fz_clear_pixmap(ctx, pix);
+
+                        fz_device* dev = fz_new_draw_device(ctx, ctm, pix);
+                        fz_run_page(ctx, page, dev, fz_identity, NULL);
+                        fz_close_device(ctx, dev);
+                        fz_drop_device(ctx, dev);
+
+                        tex = createTextureFromPixmap(ctx, pix);
+                    }
+                    fz_drop_page(ctx, page);
+                    page = nullptr;
+                }
+            }
+            fz_drop_document(ctx, doc);
+            doc = nullptr;
+        }
+        fz_drop_stream(ctx, stm);
+        stm = nullptr;
+        fz_drop_buffer(ctx, fzbuf);
+        fzbuf = nullptr;
+    }
+    fz_catch(ctx) {
+        if (page) fz_drop_page(ctx, page);
+        if (doc) fz_drop_document(ctx, doc);
+        if (stm) fz_drop_stream(ctx, stm);
+        if (fzbuf) fz_drop_buffer(ctx, fzbuf);
+        if (pix) fz_drop_pixmap(ctx, pix);
+        return nullptr;
+    }
+
+    if (pix) {
+        fz_drop_pixmap(ctx, pix);
+    }
+
+    return tex;
+}
+
+bool getImageDimensionsFromFile(const std::string& filePath, int& outW, int& outH) {
+    outW = 0;
+    outH = 0;
+    if (filePath.empty()) return false;
+
+    fz_context* ctx = getFzContext();
+    if (!ctx) return false;
+
+    fz_document* doc = nullptr;
+    fz_page* page = nullptr;
+    bool success = false;
+
+    fz_try(ctx) {
+        doc = fz_open_document(ctx, filePath.c_str());
+        if (doc) {
+            if (fz_count_pages(ctx, doc) > 0) {
+                page = fz_load_page(ctx, doc, 0);
+                if (page) {
+                    fz_rect bounds = fz_bound_page(ctx, page);
+                    outW = static_cast<int>(bounds.x1 - bounds.x0);
+                    outH = static_cast<int>(bounds.y1 - bounds.y0);
+                    success = (outW > 0 && outH > 0);
+                    fz_drop_page(ctx, page);
+                    page = nullptr;
+                }
+            }
+            fz_drop_document(ctx, doc);
+            doc = nullptr;
+        }
+    }
+    fz_catch(ctx) {
+        if (page) fz_drop_page(ctx, page);
+        if (doc) fz_drop_document(ctx, doc);
+        return false;
+    }
+
+    return success;
+}
+
 }

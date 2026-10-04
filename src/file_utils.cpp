@@ -33,6 +33,23 @@ std::string getFileName(const std::string& path) {
     return path.substr(slashPos + 1);
 }
 
+std::string getFileNameWithoutExtension(const std::string& path) {
+    std::string filename = getFileName(path);
+    size_t dotPos = filename.find_last_of('.');
+    if (dotPos == std::string::npos) return filename;
+    return filename.substr(0, dotPos);
+}
+
+bool fileExists(const std::string& path) {
+    if (path.empty()) return false;
+    FILE* f = fopen(path.c_str(), "rb");
+    if (f) {
+        fclose(f);
+        return true;
+    }
+    return false;
+}
+
 bool isImageFile(const std::string& filename) {
     std::string ext = getExtension(filename);
     return (ext == "png" || ext == "jpg" || ext == "jpeg" || ext == "bmp" || ext == "webp" || ext == "gif" || ext == "tga");

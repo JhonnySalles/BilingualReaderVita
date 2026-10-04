@@ -55,6 +55,9 @@ set(SOURCES
   src/cache_manager.cpp
   src/parses/parse_tar.cpp
   src/parses/parse_rar.cpp
+  src/parses/parse_mupdf.cpp
+  src/parses/parse_factory.cpp
+  src/managers/pages_link_manager.cpp
   src/reader_txt.cpp
   src/reader_cbz.cpp
   src/reader_epub.cpp

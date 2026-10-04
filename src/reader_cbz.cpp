@@ -289,6 +289,6 @@ void ReaderCBZ::render(vita2d_pgf* font, bool fullscreen) {
 
         UIComponents::drawReaderTopBar(filename, pageInfo, isRotated, badgeColor);
         UIComponents::drawReaderProgressBar(currentPage, totalPages, false);
-        UIComponents::drawFooter("D-Pad: Paginas | Pinca: Zoom | Arraste: Mover | O: Voltar", true);
+        UIComponents::drawFooter("D-Pad: Paginas | Pinca: Zoom | TRI: Vinculo | O: Voltar", true);
     }
 }

@@ -280,6 +280,6 @@ void ReaderEPUB::render(vita2d_pgf* font, bool fullscreen) {
         snprintf(pageInfo, sizeof(pageInfo), "%d / %d (%.0fpt)", currentPage + 1, totalPages > 0 ? totalPages : 1, currentFontSize);
         UIComponents::drawReaderTopBar(filename, pageInfo, isRotated, UITheme::BadgeEPUB);
         UIComponents::drawReaderProgressBar(currentPage, totalPages, false);
-        UIComponents::drawFooter("D-Pad: Paginas | /\\/[]: Fonte | O: Voltar", true);
+        UIComponents::drawFooter("D-Pad: Paginas | /\\/[]: Fonte | SEL: Vinculo | O: Voltar", true);
     }
 }

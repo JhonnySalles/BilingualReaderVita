@@ -24,6 +24,7 @@ struct UITopBarLayout {
 
 struct UIReaderChromeLayout {
     UIRect rotateBtn;
+    UIRect linkBtn;
     UIRect prevBook;
     UIRect nextBook;
     float contentTop = 48.0f;
@@ -36,6 +37,19 @@ struct UIConfirmDialogLayout {
     UIRect dialog;
     UIRect yesBtn;
     UIRect noBtn;
+};
+
+struct UIPagesLinkLayout {
+    UIRect primaryFileHeader;
+    UIRect selectFileBtn;
+    UIRect autoBtn;
+    UIRect simpleBtn;
+    UIRect doubleBtn;
+    UIRect sortBtn;
+    UIRect undoBtn;
+    UIRect saveBtn;
+    UIRect linkedArea;
+    UIRect unlinkedArea;
 };
 
 struct UISettingsLayout {
@@ -156,6 +170,44 @@ public:
 
     // Barra de progresso de leitura (HUD inferior do leitor)
     static void drawReaderProgressBar(int currentPage, int totalPages, bool isHudVisible);
+
+    // Layout e Renderização da Tela de Vínculo de Páginas
+    static UIPagesLinkLayout getPagesLinkLayout();
+    static void drawPagesLinkToolbar(
+        const std::string& primaryName,
+        int primaryPages,
+        const std::string& linkedName,
+        int linkedPages,
+        int selectedToolbarBtn,
+        bool hasBackup,
+        bool isLinkedLoaded
+    );
+    static void drawLinkedPageCard(
+        float x,
+        float y,
+        float w,
+        float h,
+        int index,
+        const struct LinkedPage& page,
+        vita2d_texture* thumbManga,
+        vita2d_texture* thumbLeft,
+        vita2d_texture* thumbRight,
+        bool isSelected,
+        bool isDropTarget
+    );
+    static void drawUnlinkedCard(
+        float x,
+        float y,
+        float w,
+        float h,
+        int index,
+        const struct LinkedPage& page,
+        vita2d_texture* thumb,
+        bool isSelected,
+        bool isDropTarget
+    );
+    static void drawPagesLinkScrollBar(float x, float y, float w, float h, float scrollPos, float totalRange);
+    static void drawDragGhost(float x, float y, float w, float h, vita2d_texture* thumb, const std::string& label);
 
 private:
     static vita2d_pgf* pgf;

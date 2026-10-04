@@ -20,6 +20,8 @@ public:
     bool extractPage(size_t index, const std::string& outPath) override;
     bool extractCover(const std::string& outPath) override;
     vita2d_texture* loadPageTexture(size_t index) override;
+    vita2d_texture* loadPageThumbnail(size_t index, int maxW = 90, int maxH = 130) override;
+    bool isDoublePage(size_t index) override;
 
 private:
     std::string m_filePath;

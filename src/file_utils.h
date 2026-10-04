@@ -12,6 +12,12 @@ std::string getExtension(const std::string& path);
 // Retorna apenas o nome do arquivo a partir de um path
 std::string getFileName(const std::string& path);
 
+// Retorna o nome do arquivo sem a extensão
+std::string getFileNameWithoutExtension(const std::string& path);
+
+// Verifica se um arquivo existe no disco
+bool fileExists(const std::string& path);
+
 // Verifica se a extensão é uma imagem suportada (png, jpg, jpeg, webp, bmp)
 bool isImageFile(const std::string& filename);
 

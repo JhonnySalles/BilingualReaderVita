@@ -1,6 +1,7 @@
 #include "parse_rar.h"
 #include "../file_utils.h"
 #include "../ui_components.h"
+#include "../image_loader.h"
 
 #define _UNIX
 #include "../../libs/unrar/dll.hpp"
@@ -143,11 +144,25 @@ bool ParseRar::extractCover(const std::string& outPath) {
     return extractPage(0, outPath);
 }
 
-#include "../image_loader.h"
-
 vita2d_texture* ParseRar::loadPageTexture(size_t index) {
     if (index >= m_pageNames.size()) return nullptr;
     
     std::string path = m_pageNames[index];
     return ImageLoader::loadTextureFromFile(path);
+}
+
+vita2d_texture* ParseRar::loadPageThumbnail(size_t index, int maxW, int maxH) {
+    if (index >= m_pageNames.size()) return nullptr;
+
+    std::string path = m_pageNames[index];
+    return ImageLoader::loadThumbnailFromFile(path, maxW, maxH);
+}
+
+bool ParseRar::isDoublePage(size_t index) {
+    if (index >= m_pageNames.size()) return false;
+    int w = 0, h = 0;
+    if (ImageLoader::getImageDimensionsFromFile(m_pageNames[index], w, h)) {
+        return (w > 0 && h > 0 && ((float)w / (float)h) > 1.15f);
+    }
+    return false;
 }

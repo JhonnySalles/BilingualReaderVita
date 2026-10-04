@@ -1,5 +1,6 @@
 #include "parse_tar.h"
 #include "../file_utils.h"
+#include "../image_loader.h"
 #include <algorithm>
 #include <cstring>
 #include <cstdlib>
@@ -143,8 +144,6 @@ bool ParseTar::extractCover(const std::string& outPath) {
     return extractPage(0, outPath);
 }
 
-#include "../image_loader.h"
-
 vita2d_texture* ParseTar::loadPageTexture(size_t index) {
     if (index >= m_pageNames.size() || !m_file) return nullptr;
 
@@ -161,4 +160,48 @@ vita2d_texture* ParseTar::loadPageTexture(size_t index) {
     }
 
     return ImageLoader::loadTextureFromBuffer(data.data(), data.size());
+}
+
+vita2d_texture* ParseTar::loadPageThumbnail(size_t index, int maxW, int maxH) {
+    if (index >= m_pageNames.size() || !m_file) return nullptr;
+
+    const std::string& pageName = m_pageNames[index];
+    auto it = m_entries.find(pageName);
+    if (it == m_entries.end()) return nullptr;
+
+    const TarEntry& entry = it->second;
+    fseek(m_file, entry.dataOffset, SEEK_SET);
+
+    std::vector<unsigned char> data(entry.size);
+    if (fread(data.data(), 1, entry.size, m_file) != entry.size) {
+        return nullptr;
+    }
+
+    return ImageLoader::loadThumbnailFromBuffer(data.data(), data.size(), maxW, maxH);
+}
+
+bool ParseTar::isDoublePage(size_t index) {
+    if (index >= m_pageNames.size() || !m_file) return false;
+
+    const std::string& pageName = m_pageNames[index];
+    auto it = m_entries.find(pageName);
+    if (it == m_entries.end()) return false;
+
+    const TarEntry& entry = it->second;
+    fseek(m_file, entry.dataOffset, SEEK_SET);
+
+    std::vector<unsigned char> data(entry.size);
+    if (fread(data.data(), 1, entry.size, m_file) != entry.size) {
+        return false;
+    }
+
+    // Carrega miniatura rápida para checar dimensões
+    vita2d_texture* tex = ImageLoader::loadThumbnailFromBuffer(data.data(), data.size(), 200, 200);
+    if (tex) {
+        unsigned int w = vita2d_texture_get_width(tex);
+        unsigned int h = vita2d_texture_get_height(tex);
+        vita2d_free_texture(tex);
+        return (w > 0 && h > 0 && ((float)w / (float)h) > 1.15f);
+    }
+    return false;
 }

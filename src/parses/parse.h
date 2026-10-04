@@ -29,6 +29,16 @@ public:
 
     // Carrega a textura diretamente da página na memória (se suportado pelo formato)
     virtual vita2d_texture* loadPageTexture(size_t index) = 0;
+
+    // Carrega miniatura da página em tamanho reduzido (para otimização de RAM)
+    virtual vita2d_texture* loadPageThumbnail(size_t index, int maxW = 90, int maxH = 130) {
+        return loadPageTexture(index);
+    }
+
+    // Verifica se a página possui proporção de página dupla (largura > altura)
+    virtual bool isDoublePage(size_t index) {
+        return false;
+    }
 };
 
 #endif // PARSE_H
