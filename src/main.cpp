@@ -86,6 +86,7 @@ enum class AppState {
 enum class PagesLinkFocusArea {
     TOOLBAR,
     LINKED_CARDS,
+    LINKED_DUAL_CARDS,
     UNLINKED_CARDS
 };
 
@@ -346,6 +347,19 @@ int main(int argc, char* argv[]) {
     int plToastTimer = 0;
     std::string plToastMessage = "";
 
+    // Controles de Long-press / Touch Scroll / Arraste / Botão X
+    bool plIsHoldingCross = false;
+    bool plIsLongPressActive = false;
+    int plLongPressTimer = 0;
+    bool plIsTouchScrolling = false;
+    float plTouchStartX = 0.0f;
+    float plTouchStartY = 0.0f;
+    float plTouchInitialScrollX = 0.0f;
+    int plCandidateTouchIndex = -1;
+    bool plCandidateIsUnlinked = false;
+    bool plDraggingLinkedScrollbar = false;
+    bool plDraggingUnlinkedScrollbar = false;
+
     // Estado do Seletor de Arquivo de Vínculo (Picker)
     int plPickerSelectedIndex = 0;
     int plPickerScrollOffset = 0;
@@ -368,6 +382,12 @@ int main(int argc, char* argv[]) {
                     plUnlinkedSmoothScrollX = 0.0f;
                     plIsDragging = false;
                     plDragOriginIndex = -1;
+                    plIsHoldingCross = false;
+                    plIsLongPressActive = false;
+                    plLongPressTimer = 0;
+                    plIsTouchScrolling = false;
+                    plDraggingLinkedScrollbar = false;
+                    plDraggingUnlinkedScrollbar = false;
                     currentState = AppState::PAGES_LINK;
                 }
             }
@@ -1437,17 +1457,23 @@ int main(int argc, char* argv[]) {
             float maxLinkedScroll = std::max(0.0f, totalLinked * linkedCardStep + 32.0f - 960.0f);
             float maxUnlinkedScroll = std::max(0.0f, totalNotLinked * unlinkedCardStep + 32.0f - 960.0f);
 
-            // GESTÃO DE FOCO E ROLAGEM COM D-PAD
+            // Verifica se o botão X (Cross) está sendo mantido pressionado
+            plIsHoldingCross = (pad.buttons & SCE_CTRL_CROSS) != 0;
+
+            // GESTÃO DE FOCO E TROCA RÁPIDA DE ZONAS COM OS GATILHOS (L1/R1)
             if (pressed & (SCE_CTRL_LTRIGGER | SCE_CTRL_L1)) {
-                if (plFocus == PagesLinkFocusArea::TOOLBAR) plFocus = (totalNotLinked > 0) ? PagesLinkFocusArea::UNLINKED_CARDS : PagesLinkFocusArea::LINKED_CARDS;
-                else if (plFocus == PagesLinkFocusArea::UNLINKED_CARDS) plFocus = PagesLinkFocusArea::LINKED_CARDS;
+                if (plFocus == PagesLinkFocusArea::TOOLBAR) plFocus = (totalNotLinked > 0) ? PagesLinkFocusArea::UNLINKED_CARDS : PagesLinkFocusArea::LINKED_DUAL_CARDS;
+                else if (plFocus == PagesLinkFocusArea::UNLINKED_CARDS) plFocus = PagesLinkFocusArea::LINKED_DUAL_CARDS;
+                else if (plFocus == PagesLinkFocusArea::LINKED_DUAL_CARDS) plFocus = PagesLinkFocusArea::LINKED_CARDS;
                 else plFocus = PagesLinkFocusArea::TOOLBAR;
             } else if (pressed & (SCE_CTRL_RTRIGGER | SCE_CTRL_R1)) {
                 if (plFocus == PagesLinkFocusArea::TOOLBAR) plFocus = PagesLinkFocusArea::LINKED_CARDS;
-                else if (plFocus == PagesLinkFocusArea::LINKED_CARDS) plFocus = (totalNotLinked > 0) ? PagesLinkFocusArea::UNLINKED_CARDS : PagesLinkFocusArea::TOOLBAR;
+                else if (plFocus == PagesLinkFocusArea::LINKED_CARDS) plFocus = PagesLinkFocusArea::LINKED_DUAL_CARDS;
+                else if (plFocus == PagesLinkFocusArea::LINKED_DUAL_CARDS) plFocus = (totalNotLinked > 0) ? PagesLinkFocusArea::UNLINKED_CARDS : PagesLinkFocusArea::TOOLBAR;
                 else plFocus = PagesLinkFocusArea::TOOLBAR;
             }
 
+            // CONTROLE POR BOTÕES / GAMEPAD
             if (plFocus == PagesLinkFocusArea::TOOLBAR) {
                 if (pressed & SCE_CTRL_LEFT) {
                     if (plSelectedToolbarBtn > 0) plSelectedToolbarBtn--;
@@ -1482,26 +1508,46 @@ int main(int argc, char* argv[]) {
                     }
                 }
             } else if (plFocus == PagesLinkFocusArea::LINKED_CARDS) {
-                if (pressed & SCE_CTRL_UP) {
-                    plFocus = PagesLinkFocusArea::TOOLBAR;
-                }
-                if (pressed & SCE_CTRL_DOWN) {
-                    if (totalNotLinked > 0) {
-                        plFocus = PagesLinkFocusArea::UNLINKED_CARDS;
+                if (plIsHoldingCross) {
+                    // Ao segurar X, mover para direita/esquerda na grid move o item selecionado de posição
+                    if (pressed & SCE_CTRL_LEFT) {
+                        if (plSelectedLinkedCard > 0) {
+                            linkMgr.onMove(plSelectedLinkedCard, plSelectedLinkedCard - 1);
+                            plSelectedLinkedCard--;
+                            float targetX = (plSelectedLinkedCard * linkedCardStep) - (960.0f - linkedCardW) / 2.0f;
+                            plLinkedScrollX = std::max(0.0f, std::min(maxLinkedScroll, targetX));
+                        }
                     }
-                }
-                if (pressed & SCE_CTRL_LEFT) {
-                    if (plSelectedLinkedCard > 0) {
-                        plSelectedLinkedCard--;
-                        float targetX = (plSelectedLinkedCard * linkedCardStep) - (960.0f - linkedCardW) / 2.0f;
-                        plLinkedScrollX = std::max(0.0f, std::min(maxLinkedScroll, targetX));
+                    if (pressed & SCE_CTRL_RIGHT) {
+                        if (plSelectedLinkedCard < totalLinked - 1) {
+                            linkMgr.onMove(plSelectedLinkedCard, plSelectedLinkedCard + 1);
+                            plSelectedLinkedCard++;
+                            float targetX = (plSelectedLinkedCard * linkedCardStep) - (960.0f - linkedCardW) / 2.0f;
+                            plLinkedScrollX = std::max(0.0f, std::min(maxLinkedScroll, targetX));
+                        }
                     }
-                }
-                if (pressed & SCE_CTRL_RIGHT) {
-                    if (plSelectedLinkedCard < totalLinked - 1) {
-                        plSelectedLinkedCard++;
-                        float targetX = (plSelectedLinkedCard * linkedCardStep) - (960.0f - linkedCardW) / 2.0f;
-                        plLinkedScrollX = std::max(0.0f, std::min(maxLinkedScroll, targetX));
+                } else {
+                    // Navegação normal do cursor
+                    if (pressed & SCE_CTRL_UP) {
+                        plFocus = PagesLinkFocusArea::TOOLBAR;
+                    }
+                    if (pressed & SCE_CTRL_DOWN) {
+                        // Pula para a linha de página dupla
+                        plFocus = PagesLinkFocusArea::LINKED_DUAL_CARDS;
+                    }
+                    if (pressed & SCE_CTRL_LEFT) {
+                        if (plSelectedLinkedCard > 0) {
+                            plSelectedLinkedCard--;
+                            float targetX = (plSelectedLinkedCard * linkedCardStep) - (960.0f - linkedCardW) / 2.0f;
+                            plLinkedScrollX = std::max(0.0f, std::min(maxLinkedScroll, targetX));
+                        }
+                    }
+                    if (pressed & SCE_CTRL_RIGHT) {
+                        if (plSelectedLinkedCard < totalLinked - 1) {
+                            plSelectedLinkedCard++;
+                            float targetX = (plSelectedLinkedCard * linkedCardStep) - (960.0f - linkedCardW) / 2.0f;
+                            plLinkedScrollX = std::max(0.0f, std::min(maxLinkedScroll, targetX));
+                        }
                     }
                 }
 
@@ -1509,184 +1555,330 @@ int main(int argc, char* argv[]) {
                 if (pressed & SCE_CTRL_SQUARE) {
                     linkMgr.onNotLinked(plSelectedLinkedCard);
                 }
-
-                // Auto Dupla com Triângulo
-                if (pressed & SCE_CTRL_TRIANGLE) {
-                    linkMgr.autoReorderDoublePages();
-                }
-
-                // Desfazer com Select
-                if (pressed & SCE_CTRL_SELECT) {
-                    linkMgr.returnBackup();
-                }
-
-                // Salvar com Start
-                if (pressed & SCE_CTRL_START) {
-                    linkMgr.save();
-                    plToastMessage = "Vínculo salvo com sucesso!";
-                    plToastTimer = 90;
-                }
-
-                // Mover / Soltar com Cruz
-                if (pressed & SCE_CTRL_CROSS) {
-                    if (!plIsDragging) {
-                        // Inicia arraste
-                        plIsDragging = true;
-                        plDragFromNotLinked = false;
-                        plDragOriginIndex = plSelectedLinkedCard;
-                    } else {
-                        // Solta no slot atual
-                        if (plDragFromNotLinked) {
-                            linkMgr.fromNotLinked(plDragOriginIndex, plSelectedLinkedCard);
-                        } else if (plDragOriginIndex != plSelectedLinkedCard) {
-                            linkMgr.onMove(plDragOriginIndex, plSelectedLinkedCard);
+            } else if (plFocus == PagesLinkFocusArea::LINKED_DUAL_CARDS) {
+                if (plIsHoldingCross) {
+                    // Ao segurar X na linha de página dupla, move a página secundária/dupla
+                    if (pressed & SCE_CTRL_LEFT) {
+                        if (plSelectedLinkedCard > 0) {
+                            linkMgr.onMoveDualPage(true, plSelectedLinkedCard, true, plSelectedLinkedCard - 1);
+                            plSelectedLinkedCard--;
+                            float targetX = (plSelectedLinkedCard * linkedCardStep) - (960.0f - linkedCardW) / 2.0f;
+                            plLinkedScrollX = std::max(0.0f, std::min(maxLinkedScroll, targetX));
                         }
-                        plIsDragging = false;
-                        plDragOriginIndex = -1;
                     }
+                    if (pressed & SCE_CTRL_RIGHT) {
+                        if (plSelectedLinkedCard < totalLinked - 1) {
+                            linkMgr.onMoveDualPage(true, plSelectedLinkedCard, true, plSelectedLinkedCard + 1);
+                            plSelectedLinkedCard++;
+                            float targetX = (plSelectedLinkedCard * linkedCardStep) - (960.0f - linkedCardW) / 2.0f;
+                            plLinkedScrollX = std::max(0.0f, std::min(maxLinkedScroll, targetX));
+                        }
+                    }
+                } else {
+                    if (pressed & SCE_CTRL_UP) {
+                        // Sobe para a linha de páginas vinculadas principal
+                        plFocus = PagesLinkFocusArea::LINKED_CARDS;
+                    }
+                    if (pressed & SCE_CTRL_DOWN) {
+                        // Desce para a lista de não vinculados
+                        if (totalNotLinked > 0) {
+                            plFocus = PagesLinkFocusArea::UNLINKED_CARDS;
+                        }
+                    }
+                    if (pressed & SCE_CTRL_LEFT) {
+                        if (plSelectedLinkedCard > 0) {
+                            plSelectedLinkedCard--;
+                            float targetX = (plSelectedLinkedCard * linkedCardStep) - (960.0f - linkedCardW) / 2.0f;
+                            plLinkedScrollX = std::max(0.0f, std::min(maxLinkedScroll, targetX));
+                        }
+                    }
+                    if (pressed & SCE_CTRL_RIGHT) {
+                        if (plSelectedLinkedCard < totalLinked - 1) {
+                            plSelectedLinkedCard++;
+                            float targetX = (plSelectedLinkedCard * linkedCardStep) - (960.0f - linkedCardW) / 2.0f;
+                            plLinkedScrollX = std::max(0.0f, std::min(maxLinkedScroll, targetX));
+                        }
+                    }
+                }
+
+                // Desvincular com Quadrado
+                if (pressed & SCE_CTRL_SQUARE) {
+                    linkMgr.onNotLinked(plSelectedLinkedCard);
                 }
             } else if (plFocus == PagesLinkFocusArea::UNLINKED_CARDS) {
-                if (pressed & SCE_CTRL_UP) {
-                    plFocus = PagesLinkFocusArea::LINKED_CARDS;
-                }
-                if (pressed & SCE_CTRL_LEFT) {
-                    if (plSelectedUnlinkedCard > 0) {
-                        plSelectedUnlinkedCard--;
-                        float targetX = (plSelectedUnlinkedCard * unlinkedCardStep) - (960.0f - unlinkedCardW) / 2.0f;
-                        plUnlinkedScrollX = std::max(0.0f, std::min(maxUnlinkedScroll, targetX));
+                if (plIsHoldingCross) {
+                    // Ao segurar X na lista de não vinculados, reordena o item não vinculado
+                    if (pressed & SCE_CTRL_LEFT) {
+                        if (plSelectedUnlinkedCard > 0) {
+                            std::swap(pagesNotLinked[plSelectedUnlinkedCard], pagesNotLinked[plSelectedUnlinkedCard - 1]);
+                            plSelectedUnlinkedCard--;
+                            float targetX = (plSelectedUnlinkedCard * unlinkedCardStep) - (960.0f - unlinkedCardW) / 2.0f;
+                            plUnlinkedScrollX = std::max(0.0f, std::min(maxUnlinkedScroll, targetX));
+                        }
                     }
-                }
-                if (pressed & SCE_CTRL_RIGHT) {
-                    if (plSelectedUnlinkedCard < totalNotLinked - 1) {
-                        plSelectedUnlinkedCard++;
-                        float targetX = (plSelectedUnlinkedCard * unlinkedCardStep) - (960.0f - unlinkedCardW) / 2.0f;
-                        plUnlinkedScrollX = std::max(0.0f, std::min(maxUnlinkedScroll, targetX));
+                    if (pressed & SCE_CTRL_RIGHT) {
+                        if (plSelectedUnlinkedCard < totalNotLinked - 1) {
+                            std::swap(pagesNotLinked[plSelectedUnlinkedCard], pagesNotLinked[plSelectedUnlinkedCard + 1]);
+                            plSelectedUnlinkedCard++;
+                            float targetX = (plSelectedUnlinkedCard * unlinkedCardStep) - (960.0f - unlinkedCardW) / 2.0f;
+                            plUnlinkedScrollX = std::max(0.0f, std::min(maxUnlinkedScroll, targetX));
+                        }
                     }
-                }
-                if (pressed & SCE_CTRL_CROSS) {
-                    plIsDragging = true;
-                    plDragFromNotLinked = true;
-                    plDragOriginIndex = plSelectedUnlinkedCard;
-                    plFocus = PagesLinkFocusArea::LINKED_CARDS;
+                } else {
+                    if (pressed & SCE_CTRL_UP) {
+                        // Sobe para a linha de página dupla
+                        plFocus = PagesLinkFocusArea::LINKED_DUAL_CARDS;
+                    }
+                    if (pressed & SCE_CTRL_LEFT) {
+                        if (plSelectedUnlinkedCard > 0) {
+                            plSelectedUnlinkedCard--;
+                            float targetX = (plSelectedUnlinkedCard * unlinkedCardStep) - (960.0f - unlinkedCardW) / 2.0f;
+                            plUnlinkedScrollX = std::max(0.0f, std::min(maxUnlinkedScroll, targetX));
+                        }
+                    }
+                    if (pressed & SCE_CTRL_RIGHT) {
+                        if (plSelectedUnlinkedCard < totalNotLinked - 1) {
+                            plSelectedUnlinkedCard++;
+                            float targetX = (plSelectedUnlinkedCard * unlinkedCardStep) - (960.0f - unlinkedCardW) / 2.0f;
+                            plUnlinkedScrollX = std::max(0.0f, std::min(maxUnlinkedScroll, targetX));
+                        }
+                    }
                 }
             }
 
+            // Auto Dupla com Triângulo
+            if (pressed & SCE_CTRL_TRIANGLE) {
+                linkMgr.autoReorderDoublePages();
+            }
+
+            // Desfazer com Select
+            if (pressed & SCE_CTRL_SELECT) {
+                linkMgr.returnBackup();
+            }
+
+            // Salvar com Start
+            if (pressed & SCE_CTRL_START) {
+                linkMgr.save();
+                plToastMessage = "Vínculo salvo com sucesso!";
+                plToastTimer = 90;
+            }
+
+            // Voltar / Cancelar com Círculo
             if (pressed & SCE_CTRL_CIRCLE) {
                 if (plIsDragging) {
                     plIsDragging = false;
+                    plIsLongPressActive = false;
                     plDragOriginIndex = -1;
+                    plHoverDropTargetIndex = -1;
                 } else {
                     linkMgr.close();
                     currentState = plPreviousState;
                 }
             }
 
-            // GESTÃO DE TOUCH & DRAG AND DROP
+            // GESTÃO AVANÇADA DE TOUCH, SCROLL E LONG-PRESS PARA REORGANIZAÇÃO
             if (touchDown) {
                 float tx = static_cast<float>(touchX);
                 float ty = static_cast<float>(touchY);
 
-                if (ty <= 56.0f) {
-                    // Clique na Toolbar
-                    if (layout.selectFileBtn.contains(tx, ty)) {
-                        plSelectedToolbarBtn = 0;
-                        plPickerItems = FileBrowser::scanLibrary();
-                        plPickerSelectedIndex = 0;
-                        plPickerScrollOffset = 0;
-                        plPickerSmoothScrollOffset = 0.0f;
-                        currentState = AppState::PAGES_LINK_FILE_PICKER;
-                    } else if (layout.autoBtn.contains(tx, ty)) {
-                        plSelectedToolbarBtn = 1;
-                        linkMgr.autoReorderDoublePages();
-                    } else if (layout.simpleBtn.contains(tx, ty)) {
-                        plSelectedToolbarBtn = 2;
-                        linkMgr.reorderSimplePages();
-                    } else if (layout.doubleBtn.contains(tx, ty)) {
-                        plSelectedToolbarBtn = 3;
-                        linkMgr.reorderDoublePages();
-                    } else if (layout.sortBtn.contains(tx, ty)) {
-                        plSelectedToolbarBtn = 4;
-                        linkMgr.reorderBySortPages();
-                    } else if (layout.undoBtn.contains(tx, ty)) {
-                        plSelectedToolbarBtn = 5;
-                        linkMgr.returnBackup();
-                    } else if (layout.saveBtn.contains(tx, ty)) {
-                        plSelectedToolbarBtn = 6;
-                        linkMgr.save();
-                        plToastMessage = "Vínculo salvo com sucesso!";
-                        plToastTimer = 90;
+                plTouchStartX = tx;
+                plTouchStartY = ty;
+                plLongPressTimer = 0;
+                plIsLongPressActive = false;
+                plIsTouchScrolling = false;
+                plCandidateTouchIndex = -1;
+                plDraggingLinkedScrollbar = false;
+                plDraggingUnlinkedScrollbar = false;
+
+                // 1. Interação Direta com a Barra de Progresso / Rolagem Superior (Vinculados)
+                if (ty >= 355.0f && ty <= 382.0f && tx >= 20.0f && tx <= 940.0f) {
+                    plDraggingLinkedScrollbar = true;
+                    if (maxLinkedScroll > 0.0f) {
+                        float ratio = std::max(0.0f, std::min(1.0f, (tx - 24.0f) / 912.0f));
+                        plLinkedScrollX = ratio * maxLinkedScroll;
                     }
-                } else if (ty > 56.0f && ty < 380.0f) {
-                    // Clique ou início de arraste na Área Vinculada
+                }
+                // 2. Interação Direta com a Barra de Progresso / Rolagem Inferior (Não Vinculados)
+                else if (ty >= 495.0f && ty <= 535.0f && tx >= 20.0f && tx <= 940.0f) {
+                    plDraggingUnlinkedScrollbar = true;
+                    if (maxUnlinkedScroll > 0.0f) {
+                        float ratio = std::max(0.0f, std::min(1.0f, (tx - 24.0f) / 912.0f));
+                        plUnlinkedScrollX = ratio * maxUnlinkedScroll;
+                    }
+                }
+                // 3. Área dos Cards Vinculados
+                else if (ty > 56.0f && ty < 380.0f) {
+                    plTouchInitialScrollX = plLinkedScrollX;
+                    plCandidateIsUnlinked = false;
                     int clickedIdx = static_cast<int>((tx + plLinkedSmoothScrollX - 24.0f) / linkedCardStep);
                     if (clickedIdx >= 0 && clickedIdx < totalLinked) {
-                        plSelectedLinkedCard = clickedIdx;
-                        plFocus = PagesLinkFocusArea::LINKED_CARDS;
-
-                        // Verifica se clicou no botão de desvincular (canto inferior direito)
-                        float cardX = 24.0f + clickedIdx * linkedCardStep - plLinkedSmoothScrollX;
-                        if (tx > cardX + linkedCardW - 40.0f && ty > 64.0f + linkedCardH - 40.0f) {
-                            linkMgr.onNotLinked(clickedIdx);
-                        } else {
-                            plIsDragging = true;
-                            plDragFromNotLinked = false;
-                            plDragOriginIndex = clickedIdx;
-                            plDragCurrentX = tx;
-                            plDragCurrentY = ty;
-                        }
+                        plCandidateTouchIndex = clickedIdx;
                     }
-                } else if (ty >= 380.0f && ty < 514.0f) {
-                    // Clique ou início de arraste na Área Não Vinculada
+                }
+                // 4. Área dos Cards Não Vinculados
+                else if (ty >= 380.0f && ty < 544.0f) {
+                    plTouchInitialScrollX = plUnlinkedScrollX;
+                    plCandidateIsUnlinked = true;
                     int clickedIdx = static_cast<int>((tx + plUnlinkedSmoothScrollX - 24.0f) / unlinkedCardStep);
                     if (clickedIdx >= 0 && clickedIdx < totalNotLinked) {
-                        plSelectedUnlinkedCard = clickedIdx;
-                        plFocus = PagesLinkFocusArea::UNLINKED_CARDS;
-                        plIsDragging = true;
-                        plDragFromNotLinked = true;
-                        plDragOriginIndex = clickedIdx;
-                        plDragCurrentX = tx;
-                        plDragCurrentY = ty;
+                        plCandidateTouchIndex = clickedIdx;
                     }
                 }
-            } else if (touch.reportNum > 0 && plIsDragging) {
+            } else if (touch.reportNum > 0) {
                 float tx = static_cast<float>(touchX);
                 float ty = static_cast<float>(touchY);
-                plDragCurrentX = tx;
-                plDragCurrentY = ty;
 
-                // Auto-rolagem nas bordas durante arraste
-                if (tx > 880.0f) {
-                    plLinkedScrollX = std::min(maxLinkedScroll, plLinkedScrollX + 10.0f);
-                } else if (tx < 80.0f) {
-                    plLinkedScrollX = std::max(0.0f, plLinkedScrollX - 10.0f);
-                }
-
-                if (ty < 380.0f) {
-                    plHoverDropIsUnlinked = false;
-                    int targetIdx = static_cast<int>((tx + plLinkedSmoothScrollX - 24.0f) / linkedCardStep);
-                    plHoverDropTargetIndex = (targetIdx >= 0 && targetIdx < totalLinked) ? targetIdx : -1;
-                } else {
-                    plHoverDropIsUnlinked = true;
-                    int targetIdx = static_cast<int>((tx + plUnlinkedSmoothScrollX - 24.0f) / unlinkedCardStep);
-                    plHoverDropTargetIndex = (targetIdx >= 0 && targetIdx < totalNotLinked) ? targetIdx : -1;
-                }
-            } else if (touchUp && plIsDragging) {
-                if (!plDragFromNotLinked) {
-                    if (!plHoverDropIsUnlinked && plHoverDropTargetIndex >= 0 && plHoverDropTargetIndex != plDragOriginIndex) {
-                        linkMgr.onMove(plDragOriginIndex, plHoverDropTargetIndex);
-                        plSelectedLinkedCard = plHoverDropTargetIndex;
-                    } else if (plHoverDropIsUnlinked) {
-                        linkMgr.onNotLinked(plDragOriginIndex);
+                if (plDraggingLinkedScrollbar) {
+                    if (maxLinkedScroll > 0.0f) {
+                        float ratio = std::max(0.0f, std::min(1.0f, (tx - 24.0f) / 912.0f));
+                        plLinkedScrollX = ratio * maxLinkedScroll;
+                    }
+                } else if (plDraggingUnlinkedScrollbar) {
+                    if (maxUnlinkedScroll > 0.0f) {
+                        float ratio = std::max(0.0f, std::min(1.0f, (tx - 24.0f) / 912.0f));
+                        plUnlinkedScrollX = ratio * maxUnlinkedScroll;
                     }
                 } else {
-                    if (!plHoverDropIsUnlinked && plHoverDropTargetIndex >= 0) {
-                        linkMgr.fromNotLinked(plDragOriginIndex, plHoverDropTargetIndex);
-                        plSelectedLinkedCard = plHoverDropTargetIndex;
+                    float distX = tx - plTouchStartX;
+                    float distY = ty - plTouchStartY;
+                    float totalDist = std::sqrt(distX * distX + distY * distY);
+
+                    // Se ainda não ativou Long-Press e não está rolando
+                    if (!plIsLongPressActive && !plIsTouchScrolling) {
+                        if (totalDist > 14.0f) {
+                            // Dedo moveu antes de 1 segundo: inicia ROLAGEM PURO (Touch Scroll)
+                            plIsTouchScrolling = true;
+                        } else if (plCandidateTouchIndex >= 0) {
+                            // Dedo parado no mesmo ponto: incrementa temporizador de Long Click (1 segundo ~= 55-60 frames)
+                            plLongPressTimer++;
+                            if (plLongPressTimer >= 55) {
+                                plIsLongPressActive = true;
+                                plIsDragging = true;
+                                plDragOriginIndex = plCandidateTouchIndex;
+                                plDragFromNotLinked = plCandidateIsUnlinked;
+                                plDragCurrentX = tx;
+                                plDragCurrentY = ty;
+                            }
+                        }
+                    }
+
+                    // Rolagem Suave com o Dedo
+                    if (plIsTouchScrolling) {
+                        if (!plCandidateIsUnlinked) {
+                            plLinkedScrollX = std::max(0.0f, std::min(maxLinkedScroll, plTouchInitialScrollX - distX));
+                        } else {
+                            plUnlinkedScrollX = std::max(0.0f, std::min(maxUnlinkedScroll, plTouchInitialScrollX - distX));
+                        }
+                    }
+
+                    // Arraste de Card após Long Click
+                    if (plIsLongPressActive && plIsDragging) {
+                        plDragCurrentX = tx;
+                        plDragCurrentY = ty;
+
+                        // Auto-rolagem suave nas bordas da tela durante o arraste
+                        if (tx > 880.0f) {
+                            if (!plDragFromNotLinked) plLinkedScrollX = std::min(maxLinkedScroll, plLinkedScrollX + 8.0f);
+                            else plUnlinkedScrollX = std::min(maxUnlinkedScroll, plUnlinkedScrollX + 8.0f);
+                        } else if (tx < 80.0f) {
+                            if (!plDragFromNotLinked) plLinkedScrollX = std::max(0.0f, plLinkedScrollX - 8.0f);
+                            else plUnlinkedScrollX = std::max(0.0f, plUnlinkedScrollX - 8.0f);
+                        }
+
+                        // Cálculo do alvo de soltura
+                        if (ty < 380.0f) {
+                            plHoverDropIsUnlinked = false;
+                            int targetIdx = static_cast<int>((tx + plLinkedSmoothScrollX - 24.0f) / linkedCardStep);
+                            plHoverDropTargetIndex = (targetIdx >= 0 && targetIdx < totalLinked) ? targetIdx : -1;
+                        } else {
+                            plHoverDropIsUnlinked = true;
+                            int targetIdx = static_cast<int>((tx + plUnlinkedSmoothScrollX - 24.0f) / unlinkedCardStep);
+                            plHoverDropTargetIndex = (targetIdx >= 0 && targetIdx < totalNotLinked) ? targetIdx : -1;
+                        }
                     }
                 }
-                plIsDragging = false;
-                plDragOriginIndex = -1;
-                plHoverDropTargetIndex = -1;
+            } else if (touchUp) {
+                float tx = static_cast<float>(touchX);
+                float ty = static_cast<float>(touchY);
+
+                if (plDraggingLinkedScrollbar || plDraggingUnlinkedScrollbar) {
+                    plDraggingLinkedScrollbar = false;
+                    plDraggingUnlinkedScrollbar = false;
+                } else if (plIsLongPressActive && plIsDragging) {
+                    // Soltura do Card após Reorganização por Long Click
+                    if (!plDragFromNotLinked) {
+                        if (!plHoverDropIsUnlinked && plHoverDropTargetIndex >= 0 && plHoverDropTargetIndex != plDragOriginIndex) {
+                            linkMgr.onMove(plDragOriginIndex, plHoverDropTargetIndex);
+                            plSelectedLinkedCard = plHoverDropTargetIndex;
+                            plFocus = PagesLinkFocusArea::LINKED_CARDS;
+                        } else if (plHoverDropIsUnlinked) {
+                            linkMgr.onNotLinked(plDragOriginIndex);
+                        }
+                    } else {
+                        if (!plHoverDropIsUnlinked && plHoverDropTargetIndex >= 0) {
+                            linkMgr.fromNotLinked(plDragOriginIndex, plHoverDropTargetIndex);
+                            plSelectedLinkedCard = plHoverDropTargetIndex;
+                            plFocus = PagesLinkFocusArea::LINKED_CARDS;
+                        }
+                    }
+                    plIsDragging = false;
+                    plIsLongPressActive = false;
+                    plDragOriginIndex = -1;
+                    plHoverDropTargetIndex = -1;
+                } else if (!plIsTouchScrolling) {
+                    // Clique Simples (Tap)
+                    if (ty <= 56.0f) {
+                        if (layout.selectFileBtn.contains(tx, ty)) {
+                            plSelectedToolbarBtn = 0;
+                            plPickerItems = FileBrowser::scanLibrary();
+                            plPickerSelectedIndex = 0;
+                            plPickerScrollOffset = 0;
+                            plPickerSmoothScrollOffset = 0.0f;
+                            currentState = AppState::PAGES_LINK_FILE_PICKER;
+                        } else if (layout.autoBtn.contains(tx, ty)) {
+                            plSelectedToolbarBtn = 1;
+                            linkMgr.autoReorderDoublePages();
+                        } else if (layout.simpleBtn.contains(tx, ty)) {
+                            plSelectedToolbarBtn = 2;
+                            linkMgr.reorderSimplePages();
+                        } else if (layout.doubleBtn.contains(tx, ty)) {
+                            plSelectedToolbarBtn = 3;
+                            linkMgr.reorderDoublePages();
+                        } else if (layout.sortBtn.contains(tx, ty)) {
+                            plSelectedToolbarBtn = 4;
+                            linkMgr.reorderBySortPages();
+                        } else if (layout.undoBtn.contains(tx, ty)) {
+                            plSelectedToolbarBtn = 5;
+                            linkMgr.returnBackup();
+                        } else if (layout.saveBtn.contains(tx, ty)) {
+                            plSelectedToolbarBtn = 6;
+                            linkMgr.save();
+                            plToastMessage = "Vínculo salvo com sucesso!";
+                            plToastTimer = 90;
+                        }
+                    } else if (ty > 56.0f && ty < 380.0f) {
+                        if (plCandidateTouchIndex >= 0 && plCandidateTouchIndex < totalLinked) {
+                            plSelectedLinkedCard = plCandidateTouchIndex;
+                            plFocus = PagesLinkFocusArea::LINKED_CARDS;
+
+                            // Verifica se tocou no botão de desvincular do card
+                            float cardX = 24.0f + plCandidateTouchIndex * linkedCardStep - plLinkedSmoothScrollX;
+                            if (tx > cardX + linkedCardW - 40.0f && ty > 64.0f + linkedCardH - 40.0f) {
+                                linkMgr.onNotLinked(plCandidateTouchIndex);
+                            }
+                        }
+                    } else if (ty >= 380.0f && ty < 544.0f) {
+                        if (plCandidateTouchIndex >= 0 && plCandidateTouchIndex < totalNotLinked) {
+                            plSelectedUnlinkedCard = plCandidateTouchIndex;
+                            plFocus = PagesLinkFocusArea::UNLINKED_CARDS;
+                        }
+                    }
+                }
+
+                // Reset das variáveis temporárias do touch
+                plIsTouchScrolling = false;
+                plLongPressTimer = 0;
+                plCandidateTouchIndex = -1;
             }
 
             // Suavização da Rolagem
@@ -1730,14 +1922,16 @@ int main(int argc, char* argv[]) {
                 vita2d_texture* thumbLeft = (page.fileLinkLeftPage != PAGE_EMPTY) ? linkMgr.getLinkedThumbnail(page.fileLinkLeftPage) : nullptr;
                 vita2d_texture* thumbRight = (page.fileLinkRightPage != PAGE_EMPTY) ? linkMgr.getLinkedThumbnail(page.fileLinkRightPage) : nullptr;
 
-                bool isSelected = (plFocus == PagesLinkFocusArea::LINKED_CARDS && i == plSelectedLinkedCard);
+                bool isSelected = (plFocus == PagesLinkFocusArea::LINKED_CARDS || plFocus == PagesLinkFocusArea::LINKED_DUAL_CARDS) && (i == plSelectedLinkedCard);
                 bool isDropTarget = (plIsDragging && !plHoverDropIsUnlinked && i == plHoverDropTargetIndex);
+                bool isGrabbed = (isSelected && plIsHoldingCross) || (plIsDragging && !plDragFromNotLinked && i == plDragOriginIndex);
+                bool isDualSlotFocused = (plFocus == PagesLinkFocusArea::LINKED_DUAL_CARDS && i == plSelectedLinkedCard);
 
-                UIComponents::drawLinkedPageCard(cardX, 64.0f, linkedCardW, linkedCardH, i, page, thumbManga, thumbLeft, thumbRight, isSelected, isDropTarget);
+                UIComponents::drawLinkedPageCard(cardX, 64.0f, linkedCardW, linkedCardH, i, page, thumbManga, thumbLeft, thumbRight, isSelected, isDropTarget, isGrabbed, isDualSlotFocused);
             }
 
-            // Scrollbar da Área Vinculada
-            UIComponents::drawPagesLinkScrollBar(24.0f, 368.0f, 912.0f, 6.0f, plLinkedSmoothScrollX, totalLinked * linkedCardStep);
+            // Barra de Rolagem da Área Vinculada
+            UIComponents::drawPagesLinkScrollBar(24.0f, 366.0f, 912.0f, 8.0f, plLinkedSmoothScrollX, totalLinked * linkedCardStep);
 
             // Área de Páginas Não Vinculadas (Rodapé Rolável)
             vita2d_draw_rectangle(0, 380.0f, UIComponents::getScreenW(), 134.0f, UITheme::TopBar);
@@ -1764,12 +1958,13 @@ int main(int argc, char* argv[]) {
                     vita2d_texture* thumb = (page.fileLinkLeftPage != PAGE_EMPTY) ? linkMgr.getLinkedThumbnail(page.fileLinkLeftPage) : nullptr;
                     bool isSelected = (plFocus == PagesLinkFocusArea::UNLINKED_CARDS && i == plSelectedUnlinkedCard);
                     bool isDropTarget = (plIsDragging && plHoverDropIsUnlinked && i == plHoverDropTargetIndex);
+                    bool isGrabbed = (isSelected && plIsHoldingCross) || (plIsDragging && plDragFromNotLinked && i == plDragOriginIndex);
 
-                    UIComponents::drawUnlinkedCard(cardX, 400.0f, unlinkedCardW, unlinkedCardH, i, page, thumb, isSelected, isDropTarget);
+                    UIComponents::drawUnlinkedCard(cardX, 400.0f, unlinkedCardW, unlinkedCardH, i, page, thumb, isSelected, isDropTarget, isGrabbed);
                 }
 
-                // Scrollbar da Área Não Vinculada
-                UIComponents::drawPagesLinkScrollBar(24.0f, 508.0f, 912.0f, 4.0f, plUnlinkedSmoothScrollX, totalNotLinked * unlinkedCardStep);
+                // Barra de Rolagem da Área Não Vinculada
+                UIComponents::drawPagesLinkScrollBar(24.0f, 506.0f, 912.0f, 8.0f, plUnlinkedSmoothScrollX, totalNotLinked * unlinkedCardStep);
             }
 
             // Desenha Fantasma Flutuante se Arraste Ativo
@@ -1804,8 +1999,14 @@ int main(int argc, char* argv[]) {
                 }
             }
 
-            // Rodapé com dicas de navegação
-            UIComponents::drawFooter("D-Pad: Navegar | X: Mover/Arrastar | []: Desvincular | TRI: Auto Dupla | START: Salvar | O: Voltar");
+            // Rodapé com dicas de navegação dinâmicas
+            if (plIsHoldingCross) {
+                UIComponents::drawFooter("Segurando [X]: D-Pad Dir/Esq move posição do card | Solte [X] para fixar");
+            } else if (plFocus == PagesLinkFocusArea::LINKED_DUAL_CARDS) {
+                UIComponents::drawFooter("Linha de Página Dupla | D-Pad: Cima/Baixo/Esq/Dir | Segure [X] + Dir/Esq: Mover | []: Desvincular | O: Voltar");
+            } else {
+                UIComponents::drawFooter("D-Pad: Navegar Zonas | Segure [X] + Dir/Esq: Mover Card | Long Touch: Arrastar | []: Desvincular | TRI: Auto | O: Voltar");
+            }
 
             endDrawing();
 

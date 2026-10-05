@@ -50,6 +50,8 @@ struct UIPagesLinkLayout {
     UIRect saveBtn;
     UIRect linkedArea;
     UIRect unlinkedArea;
+    UIRect linkedScrollBar;
+    UIRect unlinkedScrollBar;
 };
 
 struct UISettingsLayout {
@@ -193,7 +195,9 @@ public:
         vita2d_texture* thumbLeft,
         vita2d_texture* thumbRight,
         bool isSelected,
-        bool isDropTarget
+        bool isDropTarget,
+        bool isGrabbed = false,
+        bool isDualSlotFocused = false
     );
     static void drawUnlinkedCard(
         float x,
@@ -204,7 +208,8 @@ public:
         const struct LinkedPage& page,
         vita2d_texture* thumb,
         bool isSelected,
-        bool isDropTarget
+        bool isDropTarget,
+        bool isGrabbed = false
     );
     static void drawPagesLinkScrollBar(float x, float y, float w, float h, float scrollPos, float totalRange);
     static void drawDragGhost(float x, float y, float w, float h, vita2d_texture* thumb, const std::string& label);

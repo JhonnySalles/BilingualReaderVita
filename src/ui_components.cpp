@@ -753,6 +753,8 @@ UIPagesLinkLayout UIComponents::getPagesLinkLayout() {
     layout.saveBtn           = {828.0f, 10.0f, 120.0f, 36.0f};
     layout.linkedArea        = {0.0f, 56.0f, 960.0f, 324.0f};
     layout.unlinkedArea      = {0.0f, 380.0f, 960.0f, 134.0f};
+    layout.linkedScrollBar   = {24.0f, 366.0f, 912.0f, 10.0f};
+    layout.unlinkedScrollBar = {24.0f, 506.0f, 912.0f, 10.0f};
     return layout;
 }
 
@@ -847,29 +849,53 @@ void UIComponents::drawLinkedPageCard(
     vita2d_texture* thumbLeft,
     vita2d_texture* thumbRight,
     bool isSelected,
-    bool isDropTarget
+    bool isDropTarget,
+    bool isGrabbed,
+    bool isDualSlotFocused
 ) {
-    // Fundo do Card
-    unsigned int cardBg = isSelected ? UITheme::SurfaceActive : UITheme::Surface;
-    drawRoundedBox(x, y, w, h, 8.0f, cardBg);
+    // Efeito visual de Card Crescendo quando agarrado/selecionado para mover
+    float drawX = x;
+    float drawY = y;
+    float drawW = w;
+    float drawH = h;
 
-    // Borda de Destaque / Foco
-    if (isDropTarget) {
-        drawRoundedBox(x - 2.0f, y - 2.0f, w + 4.0f, h + 4.0f, 10.0f, UITheme::Primary);
-        drawRoundedBox(x, y, w, h, 8.0f, UITheme::SurfaceActive);
-    } else if (isSelected) {
-        vita2d_draw_line(x, y, x + w, y, UITheme::Primary);
-        vita2d_draw_line(x, y + h, x + w, y + h, UITheme::Primary);
-        vita2d_draw_line(x, y, x, y + h, UITheme::Primary);
-        vita2d_draw_line(x + w, y, x + w, y + h, UITheme::Primary);
+    if (isGrabbed) {
+        float expandW = 10.0f;
+        float expandH = 14.0f;
+        drawX = x - expandW / 2.0f;
+        drawY = y - expandH / 2.0f;
+        drawW = w + expandW;
+        drawH = h + expandH;
     }
 
-    float innerW = w - 12.0f;
-    float halfH = (h - 26.0f) / 2.0f;
+    // Fundo do Card
+    unsigned int cardBg = isSelected ? UITheme::SurfaceActive : UITheme::Surface;
+    if (isGrabbed) {
+        // Sombra de elevação quando agarrado
+        drawRoundedBox(drawX - 4.0f, drawY - 4.0f, drawW + 8.0f, drawH + 8.0f, 12.0f, applyAlpha(UITheme::Primary, 0.50f));
+    }
+    drawRoundedBox(drawX, drawY, drawW, drawH, 8.0f, cardBg);
+
+    // Borda de Destaque / Foco / Grab
+    if (isDropTarget) {
+        drawRoundedBox(drawX - 2.0f, drawY - 2.0f, drawW + 4.0f, drawH + 4.0f, 10.0f, UITheme::Primary);
+        drawRoundedBox(drawX, drawY, drawW, drawH, 8.0f, UITheme::SurfaceActive);
+    } else if (isGrabbed) {
+        drawRoundedBox(drawX - 2.0f, drawY - 2.0f, drawW + 4.0f, drawH + 4.0f, 10.0f, UITheme::Primary);
+        drawRoundedBox(drawX, drawY, drawW, drawH, 8.0f, UITheme::SurfaceActive);
+    } else if (isSelected) {
+        vita2d_draw_line(drawX, drawY, drawX + drawW, drawY, UITheme::Primary);
+        vita2d_draw_line(drawX, drawY + drawH, drawX + drawW, drawY + drawH, UITheme::Primary);
+        vita2d_draw_line(drawX, drawY, drawX, drawY + drawH, UITheme::Primary);
+        vita2d_draw_line(drawX + drawW, drawY, drawX + drawW, drawY + drawH, UITheme::Primary);
+    }
+
+    float innerW = drawW - 12.0f;
+    float halfH = (drawH - 26.0f) / 2.0f;
 
     // --- Metade Superior: Manga Original ---
-    float mangaAreaY = y + 6.0f;
-    drawRoundedBox(x + 6.0f, mangaAreaY, innerW, halfH, 6.0f, UITheme::CoverBg);
+    float mangaAreaY = drawY + 6.0f;
+    drawRoundedBox(drawX + 6.0f, mangaAreaY, innerW, halfH, 6.0f, UITheme::CoverBg);
 
     if (thumbManga) {
         float tw = (float)vita2d_texture_get_width(thumbManga);
@@ -878,13 +904,13 @@ void UIComponents::drawLinkedPageCard(
             float scale = std::min((innerW - 4.0f) / tw, (halfH - 4.0f) / th);
             float renderW = tw * scale;
             float renderH = th * scale;
-            float rx = x + 6.0f + (innerW - renderW) / 2.0f;
+            float rx = drawX + 6.0f + (innerW - renderW) / 2.0f;
             float ry = mangaAreaY + (halfH - renderH) / 2.0f;
             vita2d_draw_texture_scale(thumbManga, rx, ry, scale, scale);
         }
     } else if (pgf) {
         float tW = vita2d_pgf_text_width(pgf, 0.75f, "Carregando...");
-        vita2d_pgf_draw_text(pgf, x + 6.0f + (innerW - tW) / 2.0f, mangaAreaY + halfH / 2.0f + 6.0f, UITheme::TextSecondary, 0.75f, "Carregando...");
+        vita2d_pgf_draw_text(pgf, drawX + 6.0f + (innerW - tW) / 2.0f, mangaAreaY + halfH / 2.0f + 6.0f, UITheme::TextSecondary, 0.75f, "Carregando...");
     }
 
     // Badge do número da página original
@@ -892,32 +918,41 @@ void UIComponents::drawLinkedPageCard(
         char buf[24];
         snprintf(buf, sizeof(buf), "#%d", page.mangaPage + 1);
         float bW = vita2d_pgf_text_width(pgf, 0.75f, buf) + 10.0f;
-        drawRoundedBox(x + 8.0f, mangaAreaY + 4.0f, bW, 18.0f, 4.0f, applyAlpha(UITheme::Background, 0.85f));
-        vita2d_pgf_draw_text(pgf, x + 13.0f, mangaAreaY + 17.0f, UITheme::Primary, 0.75f, buf);
+        drawRoundedBox(drawX + 8.0f, mangaAreaY + 4.0f, bW, 18.0f, 4.0f, applyAlpha(UITheme::Background, 0.85f));
+        vita2d_pgf_draw_text(pgf, drawX + 13.0f, mangaAreaY + 17.0f, UITheme::Primary, 0.75f, buf);
 
         if (page.isMangaDualPage) {
-            drawRoundedBox(x + innerW - 42.0f, mangaAreaY + 4.0f, 44.0f, 18.0f, 4.0f, UITheme::BadgeCBZ);
-            vita2d_pgf_draw_text(pgf, x + innerW - 38.0f, mangaAreaY + 17.0f, RGBA8(0,0,0,255), 0.70f, "DUPLA");
+            drawRoundedBox(drawX + innerW - 42.0f, mangaAreaY + 4.0f, 44.0f, 18.0f, 4.0f, UITheme::BadgeCBZ);
+            vita2d_pgf_draw_text(pgf, drawX + innerW - 38.0f, mangaAreaY + 17.0f, RGBA8(0,0,0,255), 0.70f, "DUPLA");
         }
     }
 
     // --- Divisor Central ---
     float divY = mangaAreaY + halfH + 4.0f;
-    vita2d_draw_line(x + 8.0f, divY + 4.0f, x + w - 8.0f, divY + 4.0f, UITheme::Divider);
-    drawRoundedBox(x + (w - 20.0f) / 2.0f, divY - 2.0f, 20.0f, 14.0f, 7.0f, UITheme::Background);
+    vita2d_draw_line(drawX + 8.0f, divY + 4.0f, drawX + drawW - 8.0f, divY + 4.0f, UITheme::Divider);
+    drawRoundedBox(drawX + (drawW - 20.0f) / 2.0f, divY - 2.0f, 20.0f, 14.0f, 7.0f, UITheme::Background);
     if (pgf) {
-        vita2d_pgf_draw_text(pgf, x + (w - 10.0f) / 2.0f, divY + 9.0f, UITheme::Primary, 0.70f, "v");
+        vita2d_pgf_draw_text(pgf, drawX + (drawW - 10.0f) / 2.0f, divY + 9.0f, UITheme::Primary, 0.70f, "v");
     }
 
     // --- Metade Inferior: Arquivo Vinculado ---
     float linkAreaY = divY + 14.0f;
-    drawRoundedBox(x + 6.0f, linkAreaY, innerW, halfH, 6.0f, UITheme::CoverBg);
+    drawRoundedBox(drawX + 6.0f, linkAreaY, innerW, halfH, 6.0f, UITheme::CoverBg);
+
+    // Destaca o slot de página dupla quando focado especificamente
+    if (isDualSlotFocused) {
+        drawRoundedBox(drawX + 4.0f, linkAreaY - 2.0f, innerW + 4.0f, halfH + 4.0f, 8.0f, applyAlpha(UITheme::BadgeCBZ, 0.40f));
+        vita2d_draw_line(drawX + 6.0f, linkAreaY, drawX + 6.0f + innerW, linkAreaY, UITheme::BadgeCBZ);
+        vita2d_draw_line(drawX + 6.0f, linkAreaY + halfH, drawX + 6.0f + innerW, linkAreaY + halfH, UITheme::BadgeCBZ);
+        vita2d_draw_line(drawX + 6.0f, linkAreaY, drawX + 6.0f, linkAreaY + halfH, UITheme::BadgeCBZ);
+        vita2d_draw_line(drawX + 6.0f + innerW, linkAreaY, drawX + 6.0f + innerW, linkAreaY + halfH, UITheme::BadgeCBZ);
+    }
 
     if (page.fileLinkLeftPage == PAGE_EMPTY) {
         // Sem Vínculo (Placeholder)
         if (pgf) {
             float tW = vita2d_pgf_text_width(pgf, 0.80f, "Sem Vínculo");
-            vita2d_pgf_draw_text(pgf, x + 6.0f + (innerW - tW) / 2.0f, linkAreaY + halfH / 2.0f + 6.0f, UITheme::TextSecondary, 0.80f, "Sem Vínculo");
+            vita2d_pgf_draw_text(pgf, drawX + 6.0f + (innerW - tW) / 2.0f, linkAreaY + halfH / 2.0f + 6.0f, UITheme::TextSecondary, 0.80f, "Sem Vínculo");
         }
     } else if (page.isDualImage && (page.fileLinkRightPage != PAGE_EMPTY || thumbRight != nullptr)) {
         // Exibição Lado a Lado de Duas Páginas Vinculadas
@@ -931,7 +966,7 @@ void UIComponents::drawLinkedPageCard(
                 float scale = std::min((halfThumbW - 2.0f) / tw, (halfH - 4.0f) / th);
                 float renderW = tw * scale;
                 float renderH = th * scale;
-                float rx = x + 6.0f + (halfThumbW - renderW) / 2.0f;
+                float rx = drawX + 6.0f + (halfThumbW - renderW) / 2.0f;
                 float ry = linkAreaY + (halfH - renderH) / 2.0f;
                 vita2d_draw_texture_scale(thumbLeft, rx, ry, scale, scale);
             }
@@ -945,7 +980,7 @@ void UIComponents::drawLinkedPageCard(
                 float scale = std::min((halfThumbW - 2.0f) / tw, (halfH - 4.0f) / th);
                 float renderW = tw * scale;
                 float renderH = th * scale;
-                float rx = x + 6.0f + halfThumbW + (halfThumbW - renderW) / 2.0f;
+                float rx = drawX + 6.0f + halfThumbW + (halfThumbW - renderW) / 2.0f;
                 float ry = linkAreaY + (halfH - renderH) / 2.0f;
                 vita2d_draw_texture_scale(thumbRight, rx, ry, scale, scale);
             }
@@ -956,11 +991,11 @@ void UIComponents::drawLinkedPageCard(
             char b1[16], b2[16];
             snprintf(b1, sizeof(b1), "#%d", page.fileLinkLeftPage + 1);
             snprintf(b2, sizeof(b2), "#%d", page.fileLinkRightPage + 1);
-            drawRoundedBox(x + 8.0f, linkAreaY + 4.0f, 32.0f, 16.0f, 3.0f, applyAlpha(UITheme::Background, 0.85f));
-            vita2d_pgf_draw_text(pgf, x + 11.0f, linkAreaY + 16.0f, UITheme::BadgeTXT, 0.68f, b1);
+            drawRoundedBox(drawX + 8.0f, linkAreaY + 4.0f, 32.0f, 16.0f, 3.0f, applyAlpha(UITheme::Background, 0.85f));
+            vita2d_pgf_draw_text(pgf, drawX + 11.0f, linkAreaY + 16.0f, UITheme::BadgeTXT, 0.68f, b1);
 
-            drawRoundedBox(x + 6.0f + halfThumbW + 2.0f, linkAreaY + 4.0f, 32.0f, 16.0f, 3.0f, applyAlpha(UITheme::Background, 0.85f));
-            vita2d_pgf_draw_text(pgf, x + 6.0f + halfThumbW + 5.0f, linkAreaY + 16.0f, UITheme::BadgeTXT, 0.68f, b2);
+            drawRoundedBox(drawX + 6.0f + halfThumbW + 2.0f, linkAreaY + 4.0f, 32.0f, 16.0f, 3.0f, applyAlpha(UITheme::Background, 0.85f));
+            vita2d_pgf_draw_text(pgf, drawX + 6.0f + halfThumbW + 5.0f, linkAreaY + 16.0f, UITheme::BadgeTXT, 0.68f, b2);
         }
     } else {
         // Página Simples Vinculada
@@ -971,7 +1006,7 @@ void UIComponents::drawLinkedPageCard(
                 float scale = std::min((innerW - 4.0f) / tw, (halfH - 4.0f) / th);
                 float renderW = tw * scale;
                 float renderH = th * scale;
-                float rx = x + 6.0f + (innerW - renderW) / 2.0f;
+                float rx = drawX + 6.0f + (innerW - renderW) / 2.0f;
                 float ry = linkAreaY + (halfH - renderH) / 2.0f;
                 vita2d_draw_texture_scale(thumbLeft, rx, ry, scale, scale);
             }
@@ -982,12 +1017,12 @@ void UIComponents::drawLinkedPageCard(
             char buf[24];
             snprintf(buf, sizeof(buf), "#%d", page.fileLinkLeftPage + 1);
             float bW = vita2d_pgf_text_width(pgf, 0.75f, buf) + 10.0f;
-            drawRoundedBox(x + 8.0f, linkAreaY + 4.0f, bW, 18.0f, 4.0f, applyAlpha(UITheme::Background, 0.85f));
-            vita2d_pgf_draw_text(pgf, x + 13.0f, linkAreaY + 17.0f, UITheme::BadgeTXT, 0.75f, buf);
+            drawRoundedBox(drawX + 8.0f, linkAreaY + 4.0f, bW, 18.0f, 4.0f, applyAlpha(UITheme::Background, 0.85f));
+            vita2d_pgf_draw_text(pgf, drawX + 13.0f, linkAreaY + 17.0f, UITheme::BadgeTXT, 0.75f, buf);
 
             if (page.isFileLeftDualPage) {
-                drawRoundedBox(x + innerW - 42.0f, linkAreaY + 4.0f, 44.0f, 18.0f, 4.0f, UITheme::BadgeCBZ);
-                vita2d_pgf_draw_text(pgf, x + innerW - 38.0f, linkAreaY + 17.0f, RGBA8(0,0,0,255), 0.70f, "DUPLA");
+                drawRoundedBox(drawX + innerW - 42.0f, linkAreaY + 4.0f, 44.0f, 18.0f, 4.0f, UITheme::BadgeCBZ);
+                vita2d_pgf_draw_text(pgf, drawX + innerW - 38.0f, linkAreaY + 17.0f, RGBA8(0,0,0,255), 0.70f, "DUPLA");
             }
         }
     }
@@ -1002,24 +1037,45 @@ void UIComponents::drawUnlinkedCard(
     const LinkedPage& page,
     vita2d_texture* thumb,
     bool isSelected,
-    bool isDropTarget
+    bool isDropTarget,
+    bool isGrabbed
 ) {
-    unsigned int bg = isSelected ? UITheme::SurfaceActive : UITheme::Surface;
-    drawRoundedBox(x, y, w, h, 6.0f, bg);
+    float drawX = x;
+    float drawY = y;
+    float drawW = w;
+    float drawH = h;
 
-    if (isDropTarget) {
-        drawRoundedBox(x - 2.0f, y - 2.0f, w + 4.0f, h + 4.0f, 8.0f, UITheme::Primary);
-        drawRoundedBox(x, y, w, h, 6.0f, UITheme::SurfaceActive);
-    } else if (isSelected) {
-        vita2d_draw_line(x, y, x + w, y, UITheme::Primary);
-        vita2d_draw_line(x, y + h, x + w, y + h, UITheme::Primary);
-        vita2d_draw_line(x, y, x, y + h, UITheme::Primary);
-        vita2d_draw_line(x + w, y, x + w, y + h, UITheme::Primary);
+    if (isGrabbed) {
+        float expandW = 8.0f;
+        float expandH = 10.0f;
+        drawX = x - expandW / 2.0f;
+        drawY = y - expandH / 2.0f;
+        drawW = w + expandW;
+        drawH = h + expandH;
     }
 
-    float innerW = w - 6.0f;
-    float innerH = h - 6.0f;
-    drawRoundedBox(x + 3.0f, y + 3.0f, innerW, innerH, 4.0f, UITheme::CoverBg);
+    unsigned int bg = isSelected ? UITheme::SurfaceActive : UITheme::Surface;
+    if (isGrabbed) {
+        drawRoundedBox(drawX - 3.0f, drawY - 3.0f, drawW + 6.0f, drawH + 6.0f, 10.0f, applyAlpha(UITheme::Primary, 0.50f));
+    }
+    drawRoundedBox(drawX, drawY, drawW, drawH, 6.0f, bg);
+
+    if (isDropTarget) {
+        drawRoundedBox(drawX - 2.0f, drawY - 2.0f, drawW + 4.0f, drawH + 4.0f, 8.0f, UITheme::Primary);
+        drawRoundedBox(drawX, drawY, drawW, drawH, 6.0f, UITheme::SurfaceActive);
+    } else if (isGrabbed) {
+        drawRoundedBox(drawX - 2.0f, drawY - 2.0f, drawW + 4.0f, drawH + 4.0f, 8.0f, UITheme::Primary);
+        drawRoundedBox(drawX, drawY, drawW, drawH, 6.0f, UITheme::SurfaceActive);
+    } else if (isSelected) {
+        vita2d_draw_line(drawX, drawY, drawX + drawW, drawY, UITheme::Primary);
+        vita2d_draw_line(drawX, drawY + drawH, drawX + drawW, drawY + drawH, UITheme::Primary);
+        vita2d_draw_line(drawX, drawY, drawX, drawY + drawH, UITheme::Primary);
+        vita2d_draw_line(drawX + drawW, drawY, drawX + drawW, drawY + drawH, UITheme::Primary);
+    }
+
+    float innerW = drawW - 6.0f;
+    float innerH = drawH - 6.0f;
+    drawRoundedBox(drawX + 3.0f, drawY + 3.0f, innerW, innerH, 4.0f, UITheme::CoverBg);
 
     if (thumb) {
         float tw = (float)vita2d_texture_get_width(thumb);
@@ -1028,8 +1084,8 @@ void UIComponents::drawUnlinkedCard(
             float scale = std::min((innerW - 2.0f) / tw, (innerH - 2.0f) / th);
             float renderW = tw * scale;
             float renderH = th * scale;
-            float rx = x + 3.0f + (innerW - renderW) / 2.0f;
-            float ry = y + 3.0f + (innerH - renderH) / 2.0f;
+            float rx = drawX + 3.0f + (innerW - renderW) / 2.0f;
+            float ry = drawY + 3.0f + (innerH - renderH) / 2.0f;
             vita2d_draw_texture_scale(thumb, rx, ry, scale, scale);
         }
     }
@@ -1039,23 +1095,25 @@ void UIComponents::drawUnlinkedCard(
         char buf[16];
         snprintf(buf, sizeof(buf), "#%d", page.fileLinkLeftPage + 1);
         float bW = vita2d_pgf_text_width(pgf, 0.70f, buf) + 8.0f;
-        drawRoundedBox(x + 4.0f, y + 4.0f, bW, 16.0f, 3.0f, applyAlpha(UITheme::Background, 0.90f));
-        vita2d_pgf_draw_text(pgf, x + 8.0f, y + 16.0f, UITheme::BadgeTXT, 0.70f, buf);
+        drawRoundedBox(drawX + 4.0f, drawY + 4.0f, bW, 16.0f, 3.0f, applyAlpha(UITheme::Background, 0.90f));
+        vita2d_pgf_draw_text(pgf, drawX + 8.0f, drawY + 16.0f, UITheme::BadgeTXT, 0.70f, buf);
     }
 }
 
 void UIComponents::drawPagesLinkScrollBar(float x, float y, float w, float h, float scrollPos, float totalRange) {
     if (totalRange <= w) return;
 
+    // Fundo / Trilho da barra de rolagem
     drawRoundedBox(x, y, w, h, h / 2.0f, UITheme::ProgressBarBg);
 
-    float thumbW = std::max(24.0f, (w / totalRange) * w);
+    float thumbW = std::max(32.0f, (w / totalRange) * w);
     float maxScroll = totalRange - w;
     float thumbX = x + (scrollPos / maxScroll) * (w - thumbW);
 
     if (thumbX < x) thumbX = x;
     if (thumbX + thumbW > x + w) thumbX = x + w - thumbW;
 
+    // Polegar da barra de rolagem
     drawRoundedBox(thumbX, y, thumbW, h, h / 2.0f, UITheme::Primary);
 }
 
