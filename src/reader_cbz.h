@@ -23,6 +23,8 @@ public:
     int getCurrentPage() const { return currentPage; }
     int getTotalPages() const { return totalPages; }
     const std::string& getFilename() const { return filename; }
+    void toggleLinkedPage();
+    bool isShowingLinkedPage() const { return showLinkedPage; }
 
     void resetZoom();
     void addZoom(float factor, float focusX = 480.0f, float focusY = 272.0f);
@@ -36,10 +38,12 @@ private:
     int currentPage;
     int totalPages;
     bool isRotated;
+    bool showLinkedPage;
 
     fz_context* ctx;
     fz_document* doc;
     vita2d_texture* currentTexture;
+    vita2d_texture* currentTextureRight;
     float zoomScale;
     float panX;
     float panY;

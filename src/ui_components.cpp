@@ -66,7 +66,8 @@ UIReaderChromeLayout UIComponents::getReaderChromeLayout() {
     layout.contentTop = 48.0f;
     layout.contentBottom = screenH - 40.0f;
     layout.rotateBtn = {isRotatedUi ? (screenW - 110.0f) : 840.0f, 8.0f, 100.0f, 32.0f};
-    layout.linkBtn   = {isRotatedUi ? (screenW - 225.0f) : 725.0f, 8.0f, 105.0f, 32.0f};
+    layout.toggleBtn = {isRotatedUi ? (screenW - 225.0f) : 730.0f, 8.0f, 105.0f, 32.0f};
+    layout.linkBtn   = {isRotatedUi ? (screenW - 340.0f) : 615.0f, 8.0f, 105.0f, 32.0f};
     layout.prevBook  = {isRotatedUi ? (screenW - 240.0f) : 680.0f, screenH - 36.0f, 110.0f, 32.0f};
     layout.nextBook  = {isRotatedUi ? (screenW - 120.0f) : 810.0f, screenH - 36.0f, 110.0f, 32.0f};
     return layout;
@@ -464,7 +465,7 @@ void UIComponents::drawLibraryScrollBar(float currentOffset, int totalItems, int
 }
 
 
-void UIComponents::drawReaderTopBar(const std::string& title, const std::string& extraInfo, bool isRotated, unsigned int badgeColor) {
+void UIComponents::drawReaderTopBar(const std::string& title, const std::string& extraInfo, bool isRotated, bool showLinkedPage, unsigned int badgeColor) {
     UIReaderChromeLayout chrome = getReaderChromeLayout();
     vita2d_draw_rectangle(0, 0, screenW, chrome.contentTop, UITheme::TopBar);
     vita2d_draw_line(0, chrome.contentTop, screenW, chrome.contentTop, UITheme::Divider);
@@ -489,7 +490,15 @@ void UIComponents::drawReaderTopBar(const std::string& title, const std::string&
     // Botão de Vínculo de Páginas
     drawRoundedBox(chrome.linkBtn.x, chrome.linkBtn.y, chrome.linkBtn.w, chrome.linkBtn.h, 6.0f, UITheme::Surface);
     if (pgf) {
-        vita2d_pgf_draw_text(pgf, chrome.linkBtn.x + 10.0f, chrome.linkBtn.y + 22.0f, UITheme::TextPrimary, 0.78f, "[#] Vinculo");
+        vita2d_pgf_draw_text(pgf, chrome.linkBtn.x + 10.0f, chrome.linkBtn.y + 22.0f, UITheme::TextPrimary, 0.78f, "[#] Vincular");
+    }
+
+    // Botão de Alternância
+    unsigned int toggleBg = showLinkedPage ? UITheme::Primary : UITheme::Surface;
+    unsigned int toggleTextCol = showLinkedPage ? UITheme::OnPrimary : UITheme::TextPrimary;
+    drawRoundedBox(chrome.toggleBtn.x, chrome.toggleBtn.y, chrome.toggleBtn.w, chrome.toggleBtn.h, 6.0f, toggleBg);
+    if (pgf) {
+        vita2d_pgf_draw_text(pgf, chrome.toggleBtn.x + 10.0f, chrome.toggleBtn.y + 22.0f, toggleTextCol, 0.78f, showLinkedPage ? "[*] Vínculo" : "[ ] Original");
     }
 
     // Botão de Rotação 90 Graus
@@ -812,9 +821,13 @@ void UIComponents::drawPagesLinkToolbar(
     auto drawBtn = [&](const UIRect& r, int btnIdx, const char* label, bool enabled, unsigned int customColor = 0) {
         bool focused = (selectedToolbarBtn == btnIdx);
         unsigned int bg = focused ? UITheme::SurfaceActive : UITheme::Surface;
-        if (customColor != 0 && !focused) bg = customColor;
-        float alpha = enabled ? 1.0f : 0.4f;
-        drawRoundedBox(r.x, r.y, r.w, r.h, 6.0f, applyAlpha(bg, alpha));
+        if (customColor != 0 && !focused) {
+            bg = enabled ? customColor : UITheme::SurfaceActive;
+        } else if (!enabled) {
+            bg = UITheme::SurfaceActive; // darker theme color instead of transparency
+        }
+        
+        drawRoundedBox(r.x, r.y, r.w, r.h, 6.0f, bg);
         if (focused) {
             vita2d_draw_line(r.x, r.y, r.x + r.w, r.y, UITheme::Primary);
             vita2d_draw_line(r.x, r.y + r.h, r.x + r.w, r.y + r.h, UITheme::Primary);
@@ -826,7 +839,8 @@ void UIComponents::drawPagesLinkToolbar(
             float tx = r.x + (r.w - tW) / 2.0f;
             float ty = r.y + 24.0f;
             unsigned int tc = focused ? UITheme::Primary : UITheme::TextPrimary;
-            vita2d_pgf_draw_text(pgf, tx, ty, applyAlpha(tc, alpha), 0.80f, label);
+            if (!enabled) tc = UITheme::TextSecondary;
+            vita2d_pgf_draw_text(pgf, tx, ty, tc, 0.80f, label);
         }
     };
 

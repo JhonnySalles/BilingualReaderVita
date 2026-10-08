@@ -2,6 +2,7 @@
 #include "ui_components.h"
 #include "file_utils.h"
 #include "parses/parse_rar.h"
+#include "managers/pages_link_manager.h"
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
@@ -14,9 +15,11 @@ ReaderCBZ::ReaderCBZ()
     : currentPage(0), 
       totalPages(0), 
       isRotated(false), 
+      showLinkedPage(false),
       ctx(nullptr), 
       doc(nullptr), 
       currentTexture(nullptr), 
+      currentTextureRight(nullptr),
       zoomScale(1.0f), 
       panX(0.0f), 
       panY(0.0f),
@@ -33,6 +36,16 @@ void ReaderCBZ::freeTexture() {
         vita2d_free_texture(currentTexture);
         currentTexture = nullptr;
     }
+    if (currentTextureRight) {
+        vita2d_wait_rendering_done();
+        vita2d_free_texture(currentTextureRight);
+        currentTextureRight = nullptr;
+    }
+}
+
+void ReaderCBZ::toggleLinkedPage() {
+    showLinkedPage = !showLinkedPage;
+    loadPageTexture(currentPage);
 }
 
 void ReaderCBZ::resetZoom() {
@@ -80,6 +93,7 @@ void ReaderCBZ::close() {
     filename = "";
     filePath = "";
     typeString = "CBZ";
+    showLinkedPage = false;
     resetZoom();
 }
 
@@ -150,6 +164,29 @@ void ReaderCBZ::setRotated(bool rotated) {
 void ReaderCBZ::loadPageTexture(int pageIndex) {
     freeTexture();
     if (pageIndex < 0 || pageIndex >= totalPages) return;
+
+    if (showLinkedPage) {
+        auto& linkMgr = PagesLinkManager::getInstance();
+        if (linkMgr.isLinkedLoaded()) {
+            auto& pages = linkMgr.getPagesLink();
+            if (pageIndex >= 0 && pageIndex < pages.size()) {
+                auto& link = pages[pageIndex];
+                if (link.fileLinkLeftPage != -1) {
+                    Parse* lParse = linkMgr.getLinkedParse();
+                    if (lParse) {
+                        if (link.fileLinkRightPage != -1) {
+                            currentTexture = lParse->loadPageTexture(link.fileLinkLeftPage);
+                            currentTextureRight = lParse->loadPageTexture(link.fileLinkRightPage);
+                            return;
+                        } else {
+                            currentTexture = lParse->loadPageTexture(link.fileLinkLeftPage);
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     if (rarParser) {
         currentTexture = rarParser->loadPageTexture(pageIndex);
@@ -250,7 +287,26 @@ void ReaderCBZ::render(vita2d_pgf* font, bool fullscreen) {
     float screenH = isRotated ? 960.0f : 544.0f;
     vita2d_draw_rectangle(0, 0, screenW, screenH, RGBA8(10, 10, 12, 255));
 
-    if (currentTexture) {
+    if (currentTexture && currentTextureRight) {
+        unsigned int texWL = vita2d_texture_get_width(currentTexture);
+        unsigned int texHL = vita2d_texture_get_height(currentTexture);
+        unsigned int texWR = vita2d_texture_get_width(currentTextureRight);
+        unsigned int texHR = vita2d_texture_get_height(currentTextureRight);
+
+        float renderWL = static_cast<float>(texWL) * zoomScale;
+        float renderHL = static_cast<float>(texHL) * zoomScale;
+        float renderWR = static_cast<float>(texWR) * zoomScale;
+        float renderHR = static_cast<float>(texHR) * zoomScale;
+
+        float totalW = renderWL + renderWR;
+
+        float posX = ((screenW - totalW) / 2.0f) + panX;
+        float posY_L = ((screenH - renderHL) / 2.0f) + panY;
+        float posY_R = ((screenH - renderHR) / 2.0f) + panY;
+
+        vita2d_draw_texture_scale(currentTexture, posX, posY_L, zoomScale, zoomScale);
+        vita2d_draw_texture_scale(currentTextureRight, posX + renderWL, posY_R, zoomScale, zoomScale);
+    } else if (currentTexture) {
         unsigned int texW = vita2d_texture_get_width(currentTexture);
         unsigned int texH = vita2d_texture_get_height(currentTexture);
 
@@ -287,8 +343,8 @@ void ReaderCBZ::render(vita2d_pgf* font, bool fullscreen) {
         else if (typeString == "CB7") badgeColor = UITheme::BadgeCB7;
         else if (typeString == "7Z") badgeColor = UITheme::Badge7Z;
 
-        UIComponents::drawReaderTopBar(filename, pageInfo, isRotated, badgeColor);
+        UIComponents::drawReaderTopBar(filename, pageInfo, isRotated, showLinkedPage, badgeColor);
         UIComponents::drawReaderProgressBar(currentPage, totalPages, false);
-        UIComponents::drawFooter("D-Pad: Paginas | Pinca: Zoom | TRI: Vinculo | O: Voltar", true);
+        UIComponents::drawFooter("D-Pad: Paginas | Pinca: Zoom | TRI: Vinculo | O: Voltar | QUAD: Trad", true);
     }
 }

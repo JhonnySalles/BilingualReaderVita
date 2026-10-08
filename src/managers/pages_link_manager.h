@@ -27,6 +27,7 @@ public:
     int getLinkedPageCount() const { return m_linkedPages; }
 
     bool isLinkedLoaded() const { return !m_linkedPath.empty() && m_linkedPages > 0; }
+    Parse* getLinkedParse() const { return m_linkedParse; }
 
     // Listas de Páginas
     std::vector<LinkedPage>& getPagesLink() { return m_pagesLink; }
@@ -55,8 +56,12 @@ public:
     // Miniaturas e Gerenciamento de Memória
     vita2d_texture* getPrimaryThumbnail(int pageIndex);
     vita2d_texture* getLinkedThumbnail(int pageIndex);
-    void purgeUnusedThumbnails(int currentCenterIndex, int windowSize = 20);
+    void purgeUnusedThumbnails(const std::vector<int>& keepPrimary, const std::vector<int>& keepLinked);
     void clearThumbnailCache();
+
+    // Detecção Sob Demanda de Páginas Duplas
+    bool isPrimaryDoublePage(int pageIndex);
+    bool isLinkedDoublePage(int pageIndex);
 
     // Persistência em Disco
     bool save();

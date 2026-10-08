@@ -5,6 +5,7 @@
 #include <fstream>
 #include <sstream>
 #include <iostream>
+#include <unordered_set>
 
 PagesLinkManager& PagesLinkManager::getInstance() {
     static PagesLinkManager instance;
@@ -23,9 +24,11 @@ void PagesLinkManager::close() {
 
     if (m_primaryParse) {
         ParseFactory::destroy(m_primaryParse);
+        m_primaryParse = nullptr;
     }
     if (m_linkedParse) {
         ParseFactory::destroy(m_linkedParse);
+        m_linkedParse = nullptr;
     }
 
     m_primaryPath.clear();
@@ -56,29 +59,71 @@ void PagesLinkManager::clearThumbnailCache() {
     m_linkedThumbs.clear();
 }
 
-void PagesLinkManager::purgeUnusedThumbnails(int currentCenterIndex, int windowSize) {
-    int minIdx = currentCenterIndex - windowSize;
-    int maxIdx = currentCenterIndex + windowSize;
+void PagesLinkManager::purgeUnusedThumbnails(const std::vector<int>& keepPrimary, const std::vector<int>& keepLinked) {
+    const size_t MAX_PRIMARY_CACHE = 35;
+    const size_t MAX_LINKED_CACHE = 45;
 
-    auto itPrim = m_primaryThumbs.begin();
-    while (itPrim != m_primaryThumbs.end()) {
-        if (itPrim->first < minIdx || itPrim->first > maxIdx) {
-            if (itPrim->second) vita2d_free_texture(itPrim->second);
-            itPrim = m_primaryThumbs.erase(itPrim);
-        } else {
-            ++itPrim;
+    if (m_primaryThumbs.size() > MAX_PRIMARY_CACHE) {
+        std::unordered_set<int> keepSet(keepPrimary.begin(), keepPrimary.end());
+        auto itPrim = m_primaryThumbs.begin();
+        while (itPrim != m_primaryThumbs.end()) {
+            if (keepSet.find(itPrim->first) == keepSet.end()) {
+                if (itPrim->second) vita2d_free_texture(itPrim->second);
+                itPrim = m_primaryThumbs.erase(itPrim);
+            } else {
+                ++itPrim;
+            }
         }
     }
 
-    auto itLink = m_linkedThumbs.begin();
-    while (itLink != m_linkedThumbs.end()) {
-        if (itLink->first < minIdx || itLink->first > maxIdx) {
-            if (itLink->second) vita2d_free_texture(itLink->second);
-            itLink = m_linkedThumbs.erase(itLink);
-        } else {
-            ++itLink;
+    if (m_linkedThumbs.size() > MAX_LINKED_CACHE) {
+        std::unordered_set<int> keepSet(keepLinked.begin(), keepLinked.end());
+        auto itLink = m_linkedThumbs.begin();
+        while (itLink != m_linkedThumbs.end()) {
+            if (keepSet.find(itLink->first) == keepSet.end()) {
+                if (itLink->second) vita2d_free_texture(itLink->second);
+                itLink = m_linkedThumbs.erase(itLink);
+            } else {
+                ++itLink;
+            }
         }
     }
+}
+
+bool PagesLinkManager::isPrimaryDoublePage(int pageIndex) {
+    if (pageIndex < 0 || pageIndex >= m_primaryPages) return false;
+    if (pageIndex < (int)m_pagesLink.size() && m_pagesLink[pageIndex].isMangaDualPage) {
+        return true;
+    }
+    auto it = m_primaryThumbs.find(pageIndex);
+    if (it != m_primaryThumbs.end() && it->second) {
+        float w = (float)vita2d_texture_get_width(it->second);
+        float h = (float)vita2d_texture_get_height(it->second);
+        if (w > 0 && h > 0 && (w / h) > 1.15f) {
+            if (pageIndex < (int)m_pagesLink.size()) m_pagesLink[pageIndex].isMangaDualPage = true;
+            return true;
+        }
+    }
+    if (m_primaryParse) {
+        bool d = m_primaryParse->isDoublePage(pageIndex);
+        if (pageIndex < (int)m_pagesLink.size()) m_pagesLink[pageIndex].isMangaDualPage = d;
+        return d;
+    }
+    return false;
+}
+
+bool PagesLinkManager::isLinkedDoublePage(int pageIndex) {
+    if (pageIndex < 0 || pageIndex >= m_linkedPages) return false;
+    auto it = m_linkedThumbs.find(pageIndex);
+    if (it != m_linkedThumbs.end() && it->second) {
+        float w = (float)vita2d_texture_get_width(it->second);
+        float h = (float)vita2d_texture_get_height(it->second);
+        return (w > 0 && h > 0 && (w / h) > 1.15f);
+    }
+    if (m_linkedParse) {
+        return m_linkedParse->isDoublePage(pageIndex);
+    }
+    return false;
 }
 
 vita2d_texture* PagesLinkManager::getPrimaryThumbnail(int pageIndex) {
@@ -90,6 +135,15 @@ vita2d_texture* PagesLinkManager::getPrimaryThumbnail(int pageIndex) {
     }
 
     vita2d_texture* tex = m_primaryParse->loadPageThumbnail(pageIndex, 100, 140);
+    if (tex) {
+        float w = (float)vita2d_texture_get_width(tex);
+        float h = (float)vita2d_texture_get_height(tex);
+        if (w > 0 && h > 0 && (w / h) > 1.15f) {
+            if (pageIndex >= 0 && pageIndex < (int)m_pagesLink.size()) {
+                m_pagesLink[pageIndex].isMangaDualPage = true;
+            }
+        }
+    }
     m_primaryThumbs[pageIndex] = tex;
     return tex;
 }
@@ -103,6 +157,19 @@ vita2d_texture* PagesLinkManager::getLinkedThumbnail(int pageIndex) {
     }
 
     vita2d_texture* tex = m_linkedParse->loadPageThumbnail(pageIndex, 100, 140);
+    if (tex) {
+        float w = (float)vita2d_texture_get_width(tex);
+        float h = (float)vita2d_texture_get_height(tex);
+        if (w > 0 && h > 0 && (w / h) > 1.15f) {
+            for (auto& lp : m_pagesLink) {
+                if (lp.fileLinkLeftPage == pageIndex) lp.isFileLeftDualPage = true;
+                if (lp.fileLinkRightPage == pageIndex) lp.isFileRightDualPage = true;
+            }
+            for (auto& lp : m_pagesNotLinked) {
+                if (lp.fileLinkLeftPage == pageIndex) lp.isFileLeftDualPage = true;
+            }
+        }
+    }
     m_linkedThumbs[pageIndex] = tex;
     return tex;
 }
@@ -124,7 +191,7 @@ bool PagesLinkManager::loadPrimaryFile(const std::string& path) {
         char buf[32];
         snprintf(buf, sizeof(buf), "%d", i + 1);
         m_pagesLink[i].mangaPageName = buf;
-        m_pagesLink[i].isMangaDualPage = m_primaryParse->isDoublePage(i);
+        m_pagesLink[i].isMangaDualPage = false;
         m_pagesLink[i].clearPageLink();
     }
 
@@ -139,6 +206,7 @@ bool PagesLinkManager::loadPrimaryFile(const std::string& path) {
 bool PagesLinkManager::loadLinkedFile(const std::string& path) {
     if (m_linkedParse) {
         ParseFactory::destroy(m_linkedParse);
+        m_linkedParse = nullptr;
     }
     for (auto& pair : m_linkedThumbs) {
         if (pair.second) vita2d_free_texture(pair.second);
@@ -167,7 +235,7 @@ bool PagesLinkManager::loadLinkedFile(const std::string& path) {
         m_pagesLink[i].fileLinkLeftPage = i;
         m_pagesLink[i].fileLinkLeftPages = m_linkedPages;
         m_pagesLink[i].fileLinkLeftPageName = buf;
-        m_pagesLink[i].isFileLeftDualPage = m_linkedParse->isDoublePage(i);
+        m_pagesLink[i].isFileLeftDualPage = false;
         m_pagesLink[i].isDualImage = false;
     }
 
@@ -180,7 +248,7 @@ bool PagesLinkManager::loadLinkedFile(const std::string& path) {
         char buf[32];
         snprintf(buf, sizeof(buf), "%d", i + 1);
         p.fileLinkLeftPageName = buf;
-        p.isFileLeftDualPage = m_linkedParse->isDoublePage(i);
+        p.isFileLeftDualPage = false;
         m_pagesNotLinked.push_back(p);
     }
 
@@ -197,6 +265,7 @@ void PagesLinkManager::clearLinkedFile() {
 
     if (m_linkedParse) {
         ParseFactory::destroy(m_linkedParse);
+        m_linkedParse = nullptr;
     }
     m_linkedPath.clear();
     m_linkedName.clear();
@@ -469,10 +538,10 @@ void PagesLinkManager::autoReorderDoublePages(bool isClear) {
     for (int i = 0; i < lastIndex; i++) {
         if (m_pagesLink[i].fileLinkLeftPage == PAGE_EMPTY) continue;
 
-        if (m_pagesLink[i].isMangaDualPage) {
+        if (isPrimaryDoublePage(i)) {
             if (i + 1 < (int)m_pagesLink.size()) {
                 LinkedPage& nextPage = m_pagesLink[i + 1];
-                if (nextPage.fileLinkLeftPage != PAGE_EMPTY && !nextPage.isFileLeftDualPage) {
+                if (nextPage.fileLinkLeftPage != PAGE_EMPTY && !isLinkedDoublePage(nextPage.fileLinkLeftPage)) {
                     m_pagesLink[i].addRightFromLeftPageLink(nextPage);
                     nextPage.clearPageLink();
 
@@ -683,7 +752,10 @@ bool PagesLinkManager::loadSavedLink() {
     file.close();
 
     if (!savedLinkedPath.empty() && FileUtils::fileExists(savedLinkedPath)) {
-        if (m_linkedParse) ParseFactory::destroy(m_linkedParse);
+        if (m_linkedParse) {
+            ParseFactory::destroy(m_linkedParse);
+            m_linkedParse = nullptr;
+        }
         m_linkedParse = ParseFactory::create(savedLinkedPath);
         m_linkedPath = savedLinkedPath;
         m_linkedName = FileUtils::getFileName(savedLinkedPath);

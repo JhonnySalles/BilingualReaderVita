@@ -24,6 +24,7 @@ struct UITopBarLayout {
 
 struct UIReaderChromeLayout {
     UIRect rotateBtn;
+    UIRect toggleBtn;
     UIRect linkBtn;
     UIRect prevBook;
     UIRect nextBook;
@@ -166,7 +167,7 @@ public:
 
     // Utilitários
     static void drawFooter(const std::string& controlsHint, bool showBookNav = false);
-    static void drawReaderTopBar(const std::string& title, const std::string& extraInfo, bool isRotated, unsigned int badgeColor = UITheme::Primary);
+    static void drawReaderTopBar(const std::string& title, const std::string& extraInfo, bool isRotated, bool showLinkedPage = false, unsigned int badgeColor = UITheme::Primary);
     static void drawBadge(float x, float y, const std::string& type, float scale = 1.0f, float alpha = 1.0f);
     static void drawStar(float x, float y, float size, unsigned int color);
 

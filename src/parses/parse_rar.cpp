@@ -22,8 +22,6 @@ static int CALLBACK UnrarCallback(UINT msg, LPARAM UserData, LPARAM P1, LPARAM P
 }
 
 ParseRar::ParseRar() {
-    m_cacheDir = "ux0:data/bilingual_reader/cache/rar_extracted/";
-    FileUtils::makeDirRecursive(m_cacheDir); // Garante que toda a árvore de diretórios existe
 }
 
 ParseRar::~ParseRar() {
@@ -39,7 +37,17 @@ bool ParseRar::open(const std::string& path) {
     close();
     m_filePath = path;
 
-    // Limpa cache anterior
+    // Gerar diretório de cache único baseado no hash do caminho do arquivo
+    unsigned int hash = 5381;
+    for (char c : path) {
+        hash = ((hash << 5) + hash) + (unsigned char)c;
+    }
+    char dirBuf[128];
+    snprintf(dirBuf, sizeof(dirBuf), "ux0:data/bilingual_reader/cache/rar_%08x/", hash);
+    m_cacheDir = dirBuf;
+    FileUtils::makeDirRecursive(m_cacheDir);
+
+    // Limpa cache anterior deste arquivo especifico
     SceUID dir = sceIoDopen(m_cacheDir.c_str());
     if (dir >= 0) {
         SceIoDirent dirent;
