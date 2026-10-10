@@ -26,6 +26,7 @@ struct UIReaderChromeLayout {
     UIRect rotateBtn;
     UIRect toggleBtn;
     UIRect linkBtn;
+    UIRect settingsBtn;
     UIRect prevBook;
     UIRect nextBook;
     float contentTop = 48.0f;
@@ -61,8 +62,10 @@ struct UISettingsLayout {
     UIRect item1;   // Modo de Exibição
     UIRect item2;   // Ordenação Padrão
     UIRect item3;   // Orientação do Leitor
-    UIRect item4;   // Exibir Número de Páginas
-    UIRect item5;   // Tamanho de Fonte Padrão
+    UIRect item4;   // Modo de Rolagem
+    UIRect item5;   // Transição de Página
+    UIRect item6;   // Exibir Número de Páginas
+    UIRect item7;   // Tamanho de Fonte Padrão
     float fontValueSplitX = 600.0f;
     float contentTotalH = 500.0f;
 

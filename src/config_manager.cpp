@@ -38,6 +38,16 @@ void ConfigManager::load() {
             m_config.isGridView = (val == "1" || val == "true");
         } else if (key == "reader_rotated") {
             m_config.readerRotated = (val == "1" || val == "true");
+        } else if (key == "reader_scroll_mode") {
+            int mode = std::stoi(val);
+            if (mode >= 0 && mode < static_cast<int>(ReaderScrollMode::COUNT)) {
+                m_config.readerScrollMode = static_cast<ReaderScrollMode>(mode);
+            }
+        } else if (key == "page_transition") {
+            int mode = std::stoi(val);
+            if (mode >= 0 && mode < static_cast<int>(PageTransition::COUNT)) {
+                m_config.pageTransition = static_cast<PageTransition>(mode);
+            }
         } else if (key == "show_page_numbers") {
             m_config.showPageNumbers = (val == "1" || val == "true");
         } else if (key == "epub_font_size") {
@@ -63,6 +73,8 @@ void ConfigManager::save() {
     file << "sort_mode=" << static_cast<int>(m_config.sortMode) << "\n";
     file << "grid_view=" << (m_config.isGridView ? "1" : "0") << "\n";
     file << "reader_rotated=" << (m_config.readerRotated ? "1" : "0") << "\n";
+    file << "reader_scroll_mode=" << static_cast<int>(m_config.readerScrollMode) << "\n";
+    file << "page_transition=" << static_cast<int>(m_config.pageTransition) << "\n";
     file << "show_page_numbers=" << (m_config.showPageNumbers ? "1" : "0") << "\n";
     file << "epub_font_size=" << m_config.epubFontSize << "\n";
     file << "theme=" << ThemeManager::key(m_config.theme) << "\n";

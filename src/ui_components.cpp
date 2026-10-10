@@ -68,6 +68,7 @@ UIReaderChromeLayout UIComponents::getReaderChromeLayout() {
     layout.rotateBtn = {isRotatedUi ? (screenW - 110.0f) : 840.0f, 8.0f, 100.0f, 32.0f};
     layout.toggleBtn = {isRotatedUi ? (screenW - 225.0f) : 730.0f, 8.0f, 105.0f, 32.0f};
     layout.linkBtn   = {isRotatedUi ? (screenW - 340.0f) : 615.0f, 8.0f, 105.0f, 32.0f};
+    layout.settingsBtn = {isRotatedUi ? (screenW - 390.0f) : 500.0f, 8.0f, isRotatedUi ? 40.0f : 100.0f, 32.0f};
     layout.prevBook  = {isRotatedUi ? (screenW - 240.0f) : 680.0f, screenH - 36.0f, 110.0f, 32.0f};
     layout.nextBook  = {isRotatedUi ? (screenW - 120.0f) : 810.0f, screenH - 36.0f, 110.0f, 32.0f};
     return layout;
@@ -106,15 +107,17 @@ UISettingsLayout UIComponents::getSettingsLayout(float scrollY) {
     layout.item1 = {32.0f, sec1Y, boxW, rowH};
     layout.item2 = {32.0f, sec1Y + rowH, boxW, rowH};
 
-    // Seção 2: Leitor & Visualização (3 itens)
+    // Seção 2: Leitor & Visualização (5 itens)
     float sec2StartY = sec1Y + rowH * 2.0f + 20.0f;
     float sec2Y = sec2StartY + 22.0f;
     layout.item3 = {32.0f, sec2Y, boxW, rowH};
     layout.item4 = {32.0f, sec2Y + rowH, boxW, rowH};
     layout.item5 = {32.0f, sec2Y + rowH * 2.0f, boxW, rowH};
+    layout.item6 = {32.0f, sec2Y + rowH * 3.0f, boxW, rowH};
+    layout.item7 = {32.0f, sec2Y + rowH * 4.0f, boxW, rowH};
 
     layout.fontValueSplitX = 32.0f + boxW * 0.55f;
-    layout.contentTotalH = (sec2Y + rowH * 3.0f) - startY + 24.0f;
+    layout.contentTotalH = (sec2Y + rowH * 5.0f) - startY + 24.0f;
     return layout;
 }
 
@@ -479,12 +482,20 @@ void UIComponents::drawReaderTopBar(const std::string& title, const std::string&
         vita2d_pgf_draw_text(pgf, 24.0f, 32.0f, badgeColor, 1.0f, displayTitle.c_str());
 
         if (!extraInfo.empty()) {
-            float infoX = chrome.linkBtn.x - 12.0f;
+            float infoX = chrome.settingsBtn.x - 12.0f;
             int infoW = vita2d_pgf_text_width(pgf, 0.85f, extraInfo.c_str());
             infoX -= static_cast<float>(infoW);
             if (infoX < 24.0f) infoX = 24.0f;
             vita2d_pgf_draw_text(pgf, infoX, 32.0f, UITheme::TextSecondary, 0.85f, extraInfo.c_str());
         }
+    }
+
+    // Botão de Configurações
+    drawRoundedBox(chrome.settingsBtn.x, chrome.settingsBtn.y, chrome.settingsBtn.w, chrome.settingsBtn.h, 6.0f, UITheme::Surface);
+    if (pgf) {
+        const char* settingsText = isRotatedUi ? "[C]" : "[ Config ]";
+        float settingsTextX = isRotatedUi ? chrome.settingsBtn.x + 8.0f : chrome.settingsBtn.x + 10.0f;
+        vita2d_pgf_draw_text(pgf, settingsTextX, chrome.settingsBtn.y + 22.0f, UITheme::TextPrimary, 0.78f, settingsText);
     }
 
     // Botão de Vínculo de Páginas
@@ -696,10 +707,12 @@ void UIComponents::drawSettingsScreen(int selectedItemIndex, const AppConfig& co
     if (pgf) {
         vita2d_pgf_draw_text(pgf, 40.0f, sec2Y - 8.0f, UITheme::Secondary, 0.9f, "LEITOR & VISUALIZAÇÃO");
     }
-    float sec2H = rowH * 3.0f;
+    float sec2H = rowH * 5.0f;
     drawRoundedBox(32.0f, sec2Y, boxW, sec2H, 10.0f, UITheme::Surface);
     vita2d_draw_line(36.0f, sec2Y + rowH, 32.0f + boxW - 4.0f, sec2Y + rowH, UITheme::Divider);
     vita2d_draw_line(36.0f, sec2Y + rowH * 2.0f, 32.0f + boxW - 4.0f, sec2Y + rowH * 2.0f, UITheme::Divider);
+    vita2d_draw_line(36.0f, sec2Y + rowH * 3.0f, 32.0f + boxW - 4.0f, sec2Y + rowH * 3.0f, UITheme::Divider);
+    vita2d_draw_line(36.0f, sec2Y + rowH * 4.0f, 32.0f + boxW - 4.0f, sec2Y + rowH * 4.0f, UITheme::Divider);
 
     // Item 3: Orientação do Leitor
     if (selectedItemIndex == 3) {
@@ -715,28 +728,48 @@ void UIComponents::drawSettingsScreen(int selectedItemIndex, const AppConfig& co
         drawValueRight(layout.item3.y + 30.0f, orientStr);
     }
 
-    // Item 4: Exibir Número de Páginas
+    // Item 4: Modo de Rolagem
     if (selectedItemIndex == 4) {
         drawRoundedBox(34.0f, layout.item4.y + 2.0f, boxW - 4.0f, rowH - 4.0f, 8.0f, UITheme::SurfaceActive);
         vita2d_draw_rectangle(34.0f, layout.item4.y + 6.0f, 4.0f, rowH - 12.0f, UITheme::Primary);
     }
     if (pgf) {
-        vita2d_pgf_draw_text(pgf, 52.0f, layout.item4.y + 30.0f, UITheme::TextPrimary, 0.95f,
-                             isRotatedUi ? "Barra de Progresso" : "Exibir Barra de Progresso e Páginas");
-        drawValueRight(layout.item4.y + 30.0f, config.showPageNumbers ? "< Sim >" : "< Não >");
+        vita2d_pgf_draw_text(pgf, 52.0f, layout.item4.y + 30.0f, UITheme::TextPrimary, 0.95f, "Modo de Rolagem");
+        drawValueRight(layout.item4.y + 30.0f, readerScrollModeName(config.readerScrollMode, isRotatedUi));
     }
 
-    // Item 5: Tamanho da Fonte Padrão (EPUB/TXT)
+    // Item 5: Transição de Página
     if (selectedItemIndex == 5) {
         drawRoundedBox(34.0f, layout.item5.y + 2.0f, boxW - 4.0f, rowH - 4.0f, 8.0f, UITheme::SurfaceActive);
         vita2d_draw_rectangle(34.0f, layout.item5.y + 6.0f, 4.0f, rowH - 12.0f, UITheme::Primary);
     }
     if (pgf) {
-        vita2d_pgf_draw_text(pgf, 52.0f, layout.item5.y + 30.0f, UITheme::TextPrimary, 0.95f,
+        vita2d_pgf_draw_text(pgf, 52.0f, layout.item5.y + 30.0f, UITheme::TextPrimary, 0.95f, "Transição");
+        drawValueRight(layout.item5.y + 30.0f, pageTransitionName(config.pageTransition, isRotatedUi));
+    }
+
+    // Item 6: Exibir Número de Páginas
+    if (selectedItemIndex == 6) {
+        drawRoundedBox(34.0f, layout.item6.y + 2.0f, boxW - 4.0f, rowH - 4.0f, 8.0f, UITheme::SurfaceActive);
+        vita2d_draw_rectangle(34.0f, layout.item6.y + 6.0f, 4.0f, rowH - 12.0f, UITheme::Primary);
+    }
+    if (pgf) {
+        vita2d_pgf_draw_text(pgf, 52.0f, layout.item6.y + 30.0f, UITheme::TextPrimary, 0.95f,
+                             isRotatedUi ? "Barra de Progresso" : "Exibir Barra de Progresso e Páginas");
+        drawValueRight(layout.item6.y + 30.0f, config.showPageNumbers ? "< Sim >" : "< Não >");
+    }
+
+    // Item 7: Tamanho da Fonte Padrão (EPUB/TXT)
+    if (selectedItemIndex == 7) {
+        drawRoundedBox(34.0f, layout.item7.y + 2.0f, boxW - 4.0f, rowH - 4.0f, 8.0f, UITheme::SurfaceActive);
+        vita2d_draw_rectangle(34.0f, layout.item7.y + 6.0f, 4.0f, rowH - 12.0f, UITheme::Primary);
+    }
+    if (pgf) {
+        vita2d_pgf_draw_text(pgf, 52.0f, layout.item7.y + 30.0f, UITheme::TextPrimary, 0.95f,
                              isRotatedUi ? "Fonte EPUB" : "Tamanho de Fonte Padrão (EPUB)");
         char fontStr[32];
         snprintf(fontStr, sizeof(fontStr), "< %d px >", config.epubFontSize);
-        drawValueRight(layout.item5.y + 30.0f, fontStr);
+        drawValueRight(layout.item7.y + 30.0f, fontStr);
     }
 
     // Top Bar de Configurações sobreposta (Z-Order Top)

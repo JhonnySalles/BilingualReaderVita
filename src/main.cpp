@@ -9,6 +9,7 @@
 #include <string>
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 
 #include "ui_components.h"
 #include "config_manager.h"
@@ -291,16 +292,22 @@ int main(int argc, char* argv[]) {
             if (selected.type == FileType::TXT) {
                 if (readerTxt.loadFile(selected.fullPath, pgf)) {
                     readerTxt.setRotated(readerRotated, pgf);
+                    readerTxt.setScrollMode(appConfig.readerScrollMode);
+                    readerTxt.setPageTransition(appConfig.pageTransition);
                     currentState = AppState::READ_TXT;
                 }
             } else if (FileBrowser::isMangaType(selected.type)) {
                 if (readerCbz.loadFile(selected.fullPath)) {
                     readerCbz.setRotated(readerRotated);
+                    readerCbz.setScrollMode(appConfig.readerScrollMode);
+                    readerCbz.setPageTransition(appConfig.pageTransition);
                     currentState = AppState::READ_CBZ;
                 }
             } else if (selected.type == FileType::EPUB) {
                 if (readerEpub.loadFile(selected.fullPath, pgf)) {
                     readerEpub.setRotated(readerRotated);
+                    readerEpub.setScrollMode(appConfig.readerScrollMode);
+                    readerEpub.setPageTransition(appConfig.pageTransition);
                     currentState = AppState::READ_EPUB;
                 }
             }
@@ -324,6 +331,8 @@ int main(int argc, char* argv[]) {
             openItem(nextIdx);
         }
     };
+
+    AppState settingsReturnState = AppState::MENU;
 
     // Variáveis de Estado do Vinculador de Páginas (PagesLink)
     AppState plPreviousState = AppState::MENU;
@@ -431,7 +440,15 @@ int main(int argc, char* argv[]) {
         readerEpub.setRotated(readerRotated);
     };
 
+    uint64_t lastFrameTime = sceKernelGetProcessTimeWide();
+
     while (true) {
+        uint64_t nowFrameTime = sceKernelGetProcessTimeWide();
+        float frameDt = static_cast<float>(nowFrameTime - lastFrameTime) / 1000000.0f;
+        lastFrameTime = nowFrameTime;
+        if (frameDt > 0.05f) frameDt = 0.05f;
+        if (frameDt < 0.0f) frameDt = 0.0f;
+
         // Manipulação do teclado nativo do PS Vita
         if (ime_active) {
             SceCommonDialogStatus status = sceImeDialogGetStatus();
@@ -540,16 +557,21 @@ int main(int argc, char* argv[]) {
         // Processamento de Gestos Touch unificado para os Leitores (TXT, CBZ, EPUB)
         bool readerTapLeft = false;
         bool readerTapRight = false;
+        bool readerTapPrev = false;
+        bool readerTapNext = false;
         const bool inReader =
             currentState == AppState::READ_TXT ||
             currentState == AppState::READ_CBZ ||
             currentState == AppState::READ_EPUB;
+        const ReaderScrollMode scrollMode = appConfig.readerScrollMode;
+        const bool infiniteScroll = (scrollMode == ReaderScrollMode::InfiniteScroll);
+        const bool pagedVertical = (scrollMode == ReaderScrollMode::PagedVertical);
 
         if (inReader) {
             UIReaderChromeLayout readerChrome = UIComponents::getReaderChromeLayout();
 
-            if (touch.reportNum >= 2) {
-                // Multitoque: Zoom por pinça (Pinch-to-zoom)
+            if (touch.reportNum >= 2 && !infiniteScroll) {
+                // Multitoque: Zoom por pinça (apenas nos modos paginados)
                 float p0x = 0.0f, p0y = 0.0f, p1x = 0.0f, p1y = 0.0f;
                 mapPhysicalTouchToLogical(touch.report[0].x / 2.0f, touch.report[0].y / 2.0f, readerRotated, p0x, p0y);
                 mapPhysicalTouchToLogical(touch.report[1].x / 2.0f, touch.report[1].y / 2.0f, readerRotated, p1x, p1y);
@@ -590,7 +612,18 @@ int main(int argc, char* argv[]) {
                     int dx = touchX - readerLastTouchX;
                     int dy = touchY - readerLastTouchY;
                     if (readerIsDragging) {
-                        if (currentState == AppState::READ_CBZ) {
+                        if (infiniteScroll) {
+                            if (currentState == AppState::READ_TXT) {
+                                readerTxt.cancelScrollAnimation();
+                                readerTxt.addScroll(static_cast<float>(-dy));
+                            } else if (currentState == AppState::READ_CBZ) {
+                                readerCbz.cancelScrollAnimation();
+                                readerCbz.addScroll(static_cast<float>(-dy));
+                            } else if (currentState == AppState::READ_EPUB) {
+                                readerEpub.cancelScrollAnimation();
+                                readerEpub.addScroll(static_cast<float>(-dy));
+                            }
+                        } else if (currentState == AppState::READ_CBZ) {
                             readerCbz.addPan(static_cast<float>(dx), static_cast<float>(dy));
                         } else if (currentState == AppState::READ_EPUB) {
                             readerEpub.addPan(static_cast<float>(dx), static_cast<float>(dy));
@@ -604,7 +637,13 @@ int main(int argc, char* argv[]) {
                 if (!readerIsDragging && !readerIsPinching) {
                     bool handledBarTouch = false;
                     if (!readerFullscreen) {
-                        if (readerChrome.linkBtn.contains(static_cast<float>(readerTouchStartX),
+                        if (readerChrome.settingsBtn.contains(static_cast<float>(readerTouchStartX),
+                                                              static_cast<float>(readerTouchStartY))) {
+                            settingsReturnState = currentState;
+                            currentState = AppState::SETTINGS;
+                            settingsSelectedIndex = 0;
+                            handledBarTouch = true;
+                        } else if (readerChrome.linkBtn.contains(static_cast<float>(readerTouchStartX),
                                                           static_cast<float>(readerTouchStartY))) {
                             openPagesLink(selectedIndex);
                             handledBarTouch = true;
@@ -634,14 +673,35 @@ int main(int argc, char* argv[]) {
                             (readerTouchStartY >= static_cast<int>(readerChrome.contentTop) &&
                              readerTouchStartY < static_cast<int>(readerChrome.contentBottom));
                         if (canTurnOrToggle) {
-                            float leftEdge = readerChrome.screenW * 0.25f;
-                            float rightEdge = readerChrome.screenW * 0.75f;
-                            if (readerTouchStartX < static_cast<int>(leftEdge)) {
-                                readerTapLeft = true;
-                            } else if (readerTouchStartX > static_cast<int>(rightEdge)) {
-                                readerTapRight = true;
+                            if (infiniteScroll) {
+                                float contentH = readerChrome.contentBottom - readerChrome.contentTop;
+                                float midTop = readerChrome.contentTop + contentH * 0.35f;
+                                float midBottom = readerChrome.contentTop + contentH * 0.65f;
+                                if (readerTouchStartY >= static_cast<int>(midTop) &&
+                                    readerTouchStartY <= static_cast<int>(midBottom)) {
+                                    readerFullscreen = !readerFullscreen;
+                                }
+                            } else if (pagedVertical) {
+                                float contentH = readerChrome.contentBottom - readerChrome.contentTop;
+                                float topEdge = readerChrome.contentTop + contentH * 0.25f;
+                                float bottomEdge = readerChrome.contentTop + contentH * 0.75f;
+                                if (readerTouchStartY < static_cast<int>(topEdge)) {
+                                    readerTapPrev = true;
+                                } else if (readerTouchStartY > static_cast<int>(bottomEdge)) {
+                                    readerTapNext = true;
+                                } else {
+                                    readerFullscreen = !readerFullscreen;
+                                }
                             } else {
-                                readerFullscreen = !readerFullscreen;
+                                float leftEdge = readerChrome.screenW * 0.25f;
+                                float rightEdge = readerChrome.screenW * 0.75f;
+                                if (readerTouchStartX < static_cast<int>(leftEdge)) {
+                                    readerTapLeft = true;
+                                } else if (readerTouchStartX > static_cast<int>(rightEdge)) {
+                                    readerTapRight = true;
+                                } else {
+                                    readerFullscreen = !readerFullscreen;
+                                }
                             }
                         }
                     }
@@ -651,6 +711,11 @@ int main(int argc, char* argv[]) {
                 readerIsPinching = false;
                 readerLastPinchDist = 0.0f;
             }
+        }
+
+        if (pagedVertical) {
+            if (readerTapPrev) readerTapLeft = true;
+            if (readerTapNext) readerTapRight = true;
         }
 
         if (currentState == AppState::MENU) {
@@ -843,6 +908,7 @@ int main(int argc, char* argv[]) {
                             scrollBarTimer = 120;
                         } else if (topBar.settings.contains(sx, sy)) {
                             currentFocus = FocusArea::SETTINGS;
+                            settingsReturnState = AppState::MENU;
                             currentState = AppState::SETTINGS;
                             settingsSelectedIndex = 0;
                         } else if (topBar.refresh.contains(sx, sy)) {
@@ -998,6 +1064,7 @@ int main(int argc, char* argv[]) {
                     if (pressed & SCE_CTRL_LEFT) currentFocus = FocusArea::LAYOUT;
                     if (pressed & SCE_CTRL_RIGHT) currentFocus = FocusArea::REFRESH;
                     if (pressed & SCE_CTRL_CROSS) {
+                        settingsReturnState = AppState::MENU;
                         currentState = AppState::SETTINGS;
                         settingsSelectedIndex = 0;
                     }
@@ -1172,7 +1239,7 @@ int main(int argc, char* argv[]) {
 
 
         } else if (currentState == AppState::SETTINGS) {
-            const int totalSettingsItems = 6;
+            const int totalSettingsItems = 8;
             const int themeCount = static_cast<int>(ThemeId::COUNT);
 
             // Navegação Vertical (D-pad Cima / Baixo)
@@ -1241,10 +1308,32 @@ int main(int argc, char* argv[]) {
                         readerCbz.setRotated(readerRotated);
                         readerEpub.setRotated(readerRotated);
                         break;
-                    case 4: // Exibir Número de Páginas
+                    case 4: { // Modo de Rolagem
+                        int count = static_cast<int>(ReaderScrollMode::COUNT);
+                        int cur = static_cast<int>(appConfig.readerScrollMode);
+                        if (changeNext) cur = (cur + 1) % count;
+                        else cur = (cur - 1 + count) % count;
+                        appConfig.readerScrollMode = static_cast<ReaderScrollMode>(cur);
+                        readerTxt.setScrollMode(appConfig.readerScrollMode);
+                        readerCbz.setScrollMode(appConfig.readerScrollMode);
+                        readerEpub.setScrollMode(appConfig.readerScrollMode);
+                        break;
+                    }
+                    case 5: { // Transição de Página
+                        int count = static_cast<int>(PageTransition::COUNT);
+                        int cur = static_cast<int>(appConfig.pageTransition);
+                        if (changeNext) cur = (cur + 1) % count;
+                        else cur = (cur - 1 + count) % count;
+                        appConfig.pageTransition = static_cast<PageTransition>(cur);
+                        readerTxt.setPageTransition(appConfig.pageTransition);
+                        readerCbz.setPageTransition(appConfig.pageTransition);
+                        readerEpub.setPageTransition(appConfig.pageTransition);
+                        break;
+                    }
+                    case 6: // Exibir Número de Páginas
                         appConfig.showPageNumbers = !appConfig.showPageNumbers;
                         break;
-                    case 5: // Tamanho de Fonte Padrão (EPUB)
+                    case 7: // Tamanho de Fonte Padrão (EPUB)
                         if (changeNext) {
                             if (appConfig.epubFontSize < 44) appConfig.epubFontSize += 2;
                         } else {
@@ -1261,8 +1350,10 @@ int main(int argc, char* argv[]) {
             } else if (settingsSelectedIndex >= 3) {
                 float screenHeight = UIComponents::getScreenH();
                 if (screenHeight <= 544.0f) {
-                    // No modo horizontal, rola para dar visibilidade aos itens 3, 4 e 5
+                    // No modo horizontal, rola para dar visibilidade aos itens inferiores
                     settingsScrollY = (settingsSelectedIndex - 2) * 52.0f;
+                } else if (settingsSelectedIndex >= 6) {
+                    settingsScrollY = (settingsSelectedIndex - 5) * 52.0f;
                 } else {
                     settingsScrollY = 0.0f;
                 }
@@ -1330,10 +1421,28 @@ int main(int argc, char* argv[]) {
                         ConfigManager::getInstance().save();
                     } else if (settingsLayout.item4.contains(tx, ty)) {
                         settingsSelectedIndex = 4;
-                        appConfig.showPageNumbers = !appConfig.showPageNumbers;
+                        int count = static_cast<int>(ReaderScrollMode::COUNT);
+                        int cur = (static_cast<int>(appConfig.readerScrollMode) + 1) % count;
+                        appConfig.readerScrollMode = static_cast<ReaderScrollMode>(cur);
+                        readerTxt.setScrollMode(appConfig.readerScrollMode);
+                        readerCbz.setScrollMode(appConfig.readerScrollMode);
+                        readerEpub.setScrollMode(appConfig.readerScrollMode);
                         ConfigManager::getInstance().save();
                     } else if (settingsLayout.item5.contains(tx, ty)) {
                         settingsSelectedIndex = 5;
+                        int count = static_cast<int>(PageTransition::COUNT);
+                        int cur = (static_cast<int>(appConfig.pageTransition) + 1) % count;
+                        appConfig.pageTransition = static_cast<PageTransition>(cur);
+                        readerTxt.setPageTransition(appConfig.pageTransition);
+                        readerCbz.setPageTransition(appConfig.pageTransition);
+                        readerEpub.setPageTransition(appConfig.pageTransition);
+                        ConfigManager::getInstance().save();
+                    } else if (settingsLayout.item6.contains(tx, ty)) {
+                        settingsSelectedIndex = 6;
+                        appConfig.showPageNumbers = !appConfig.showPageNumbers;
+                        ConfigManager::getInstance().save();
+                    } else if (settingsLayout.item7.contains(tx, ty)) {
+                        settingsSelectedIndex = 7;
                         if (tx > settingsLayout.fontValueSplitX) {
                             if (appConfig.epubFontSize < 44) appConfig.epubFontSize += 2;
                         } else {
@@ -1344,10 +1453,11 @@ int main(int argc, char* argv[]) {
                 }
             }
 
-            // Voltar para o MENU
+            // Voltar para o estado de origem (MENU ou leitor)
             if (pressed & SCE_CTRL_CIRCLE) {
                 ConfigManager::getInstance().save();
-                currentState = AppState::MENU;
+                currentState = settingsReturnState;
+                settingsReturnState = AppState::MENU;
                 currentFocus = FocusArea::CONTENT;
             }
 
@@ -1363,6 +1473,10 @@ int main(int argc, char* argv[]) {
             } else if (pressed & (SCE_CTRL_LTRIGGER | SCE_CTRL_L1)) {
                 if (visibleItems.size() > 1) openPrevBook();
                 else readerTxt.prevPage();
+            } else if (appConfig.readerScrollMode == ReaderScrollMode::InfiniteScroll ||
+                       appConfig.readerScrollMode == ReaderScrollMode::PagedVertical) {
+                if ((pressed & SCE_CTRL_DOWN) || readerTapRight) readerTxt.nextPage();
+                if ((pressed & SCE_CTRL_UP) || readerTapLeft) readerTxt.prevPage();
             } else {
                 if ((pressed & (SCE_CTRL_RIGHT | SCE_CTRL_DOWN)) || readerTapRight) {
                     readerTxt.nextPage();
@@ -1374,11 +1488,17 @@ int main(int argc, char* argv[]) {
             if (pressed & (SCE_CTRL_TRIANGLE | SCE_CTRL_SELECT)) {
                 openPagesLink(selectedIndex);
             }
+            if (pressed & SCE_CTRL_START) {
+                settingsReturnState = currentState;
+                currentState = AppState::SETTINGS;
+                settingsSelectedIndex = 0;
+            }
             if (pressed & SCE_CTRL_CIRCLE) {
                 readerTxt.close();
                 currentState = AppState::MENU;
             }
 
+            readerTxt.update(frameDt);
             startDrawing();
             vita2d_clear_screen();
             readerTxt.render(pgf, readerFullscreen);
@@ -1391,6 +1511,10 @@ int main(int argc, char* argv[]) {
             } else if (pressed & (SCE_CTRL_LTRIGGER | SCE_CTRL_L1)) {
                 if (visibleItems.size() > 1) openPrevBook();
                 else readerCbz.prevPage();
+            } else if (appConfig.readerScrollMode == ReaderScrollMode::InfiniteScroll ||
+                       appConfig.readerScrollMode == ReaderScrollMode::PagedVertical) {
+                if ((pressed & SCE_CTRL_DOWN) || readerTapRight) readerCbz.nextPage();
+                if ((pressed & SCE_CTRL_UP) || readerTapLeft) readerCbz.prevPage();
             } else {
                 if ((pressed & (SCE_CTRL_RIGHT | SCE_CTRL_DOWN)) || readerTapRight) {
                     readerCbz.nextPage();
@@ -1405,11 +1529,17 @@ int main(int argc, char* argv[]) {
             if (pressed & (SCE_CTRL_TRIANGLE | SCE_CTRL_SELECT)) {
                 openPagesLink(selectedIndex);
             }
+            if (pressed & SCE_CTRL_START) {
+                settingsReturnState = currentState;
+                currentState = AppState::SETTINGS;
+                settingsSelectedIndex = 0;
+            }
             if (pressed & SCE_CTRL_CIRCLE) {
                 readerCbz.close();
                 currentState = AppState::MENU;
             }
 
+            readerCbz.update(frameDt);
             startDrawing();
             vita2d_clear_screen();
             readerCbz.render(pgf, readerFullscreen);
@@ -1422,6 +1552,10 @@ int main(int argc, char* argv[]) {
             } else if (pressed & (SCE_CTRL_LTRIGGER | SCE_CTRL_L1)) {
                 if (visibleItems.size() > 1) openPrevBook();
                 else readerEpub.prevPage();
+            } else if (appConfig.readerScrollMode == ReaderScrollMode::InfiniteScroll ||
+                       appConfig.readerScrollMode == ReaderScrollMode::PagedVertical) {
+                if ((pressed & SCE_CTRL_DOWN) || readerTapRight) readerEpub.nextPage();
+                if ((pressed & SCE_CTRL_UP) || readerTapLeft) readerEpub.prevPage();
             } else {
                 if ((pressed & (SCE_CTRL_RIGHT | SCE_CTRL_DOWN)) || readerTapRight) {
                     readerEpub.nextPage();
@@ -1439,11 +1573,17 @@ int main(int argc, char* argv[]) {
             if (pressed & SCE_CTRL_SELECT) {
                 openPagesLink(selectedIndex);
             }
+            if (pressed & SCE_CTRL_START) {
+                settingsReturnState = currentState;
+                currentState = AppState::SETTINGS;
+                settingsSelectedIndex = 0;
+            }
             if (pressed & SCE_CTRL_CIRCLE) {
                 readerEpub.close();
                 currentState = AppState::MENU;
             }
 
+            readerEpub.update(frameDt);
             startDrawing();
             vita2d_clear_screen();
             readerEpub.render(pgf, readerFullscreen);
