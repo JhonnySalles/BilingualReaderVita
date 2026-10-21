@@ -18,6 +18,7 @@
 #include "reader_cbz.h"
 #include "reader_epub.h"
 #include "managers/pages_link_manager.h"
+#include "managers/cover_manager.h"
 
 // Matriz ortográfica interna do vita2d (sem setter público).
 extern "C" float _vita2d_ortho_matrix[4 * 4];
@@ -196,6 +197,9 @@ int main(int argc, char* argv[]) {
     ConfigManager::getInstance().load();
     AppConfig& appConfig = ConfigManager::getInstance().getConfig();
 
+    // Inicializa subsistema de capas e cache
+    CoverManager::getInstance().init();
+
     // Aplica o tema salvo (ou padrão NVIDIA Green)
     ThemeManager::apply(appConfig.theme);
 
@@ -255,6 +259,10 @@ int main(int argc, char* argv[]) {
     int itemToDeleteIndex = -1;
     bool deleteConfirmYesSelected = false;
 
+    // Estado do Diálogo de Limpeza de Capas
+    bool showClearCoversConfirm = false;
+    bool clearCoversConfirmYesSelected = false;
+
     ReaderTXT readerTxt;
     ReaderCBZ readerCbz;
     ReaderEPUB readerEpub;
@@ -288,6 +296,12 @@ int main(int argc, char* argv[]) {
                 }
             }
             FileBrowser::saveMetadata(allItems);
+
+            // Gera miniatura da capa sob demanda caso ainda não tenha sido gerada
+            CoverManager::getInstance().generateCover(selected.fullPath);
+
+            // Libera todas as capas em VRAM para dar prioridade de memória total ao leitor
+            CoverManager::getInstance().clearAllTextures();
 
             if (selected.type == FileType::TXT) {
                 if (readerTxt.loadFile(selected.fullPath, pgf)) {
@@ -398,6 +412,7 @@ int main(int argc, char* argv[]) {
                     plIsTouchScrolling = false;
                     plDraggingLinkedScrollbar = false;
                     plDraggingUnlinkedScrollbar = false;
+                    CoverManager::getInstance().clearAllTextures();
                     currentState = AppState::PAGES_LINK;
                 }
             }
@@ -909,10 +924,12 @@ int main(int argc, char* argv[]) {
                         } else if (topBar.settings.contains(sx, sy)) {
                             currentFocus = FocusArea::SETTINGS;
                             settingsReturnState = AppState::MENU;
+                            CoverManager::getInstance().clearAllTextures();
                             currentState = AppState::SETTINGS;
                             settingsSelectedIndex = 0;
                         } else if (topBar.refresh.contains(sx, sy)) {
                             currentFocus = FocusArea::REFRESH;
+                            CoverManager::getInstance().clearAllTextures();
                             allItems = FileBrowser::scanLibrary();
                             FileBrowser::sortItems(allItems, currentSort);
                             visibleItems = FileBrowser::filterItems(allItems, searchQuery);
@@ -1065,6 +1082,7 @@ int main(int argc, char* argv[]) {
                     if (pressed & SCE_CTRL_RIGHT) currentFocus = FocusArea::REFRESH;
                     if (pressed & SCE_CTRL_CROSS) {
                         settingsReturnState = AppState::MENU;
+                        CoverManager::getInstance().clearAllTextures();
                         currentState = AppState::SETTINGS;
                         settingsSelectedIndex = 0;
                     }
@@ -1072,6 +1090,8 @@ int main(int argc, char* argv[]) {
                     if (pressed & SCE_CTRL_DOWN) currentFocus = FocusArea::CONTENT;
                     if (pressed & SCE_CTRL_LEFT) currentFocus = FocusArea::SETTINGS;
                     if (pressed & SCE_CTRL_CROSS) {
+                        CoverManager::getInstance().clearAllTextures();
+                        CoverManager::getInstance().refreshDiskIndex();
                         allItems = FileBrowser::scanLibrary();
                         FileBrowser::sortItems(allItems, currentSort);
                         visibleItems = FileBrowser::filterItems(allItems, searchQuery);
@@ -1084,6 +1104,8 @@ int main(int argc, char* argv[]) {
 
                 // Atualizar lista geral com Triângulo
                 if (pressed & SCE_CTRL_TRIANGLE) {
+                    CoverManager::getInstance().clearAllTextures();
+                    CoverManager::getInstance().refreshDiskIndex();
                     allItems = FileBrowser::scanLibrary();
                     FileBrowser::sortItems(allItems, currentSort);
                     visibleItems = FileBrowser::filterItems(allItems, searchQuery);
@@ -1152,8 +1174,10 @@ int main(int argc, char* argv[]) {
                         }
                         cardAlpha = std::max(0.0f, std::min(1.0f, cardAlpha));
 
+                        vita2d_texture* coverTex = CoverManager::getInstance().getCoverTexture(item.fullPath);
+
                         float cardListW = readerRotated ? 480.0f : 896.0f;
-                        UIComponents::drawListCard(32.0f, y, cardListW, cardHeight, isSelected, item, cardAlpha);
+                        UIComponents::drawListCard(32.0f, y, cardListW, cardHeight, isSelected, item, cardAlpha, coverTex);
                     }
 
                 } else {
@@ -1199,7 +1223,9 @@ int main(int argc, char* argv[]) {
                             }
                             cardAlpha = std::max(0.0f, std::min(1.0f, cardAlpha));
 
-                            UIComponents::drawGridCard(x, y, cardW, cardH, isSelected, item, cardAlpha);
+                            vita2d_texture* coverTex = CoverManager::getInstance().getCoverTexture(item.fullPath);
+
+                            UIComponents::drawGridCard(x, y, cardW, cardH, isSelected, item, cardAlpha, coverTex);
                         }
                     }
                 }
@@ -1236,112 +1262,187 @@ int main(int argc, char* argv[]) {
             }
 
             endDrawing();
+            CoverManager::getInstance().trimCache(32);
 
 
         } else if (currentState == AppState::SETTINGS) {
-            const int totalSettingsItems = 8;
+            const int totalSettingsItems = 10;
             const int themeCount = static_cast<int>(ThemeId::COUNT);
 
-            // Navegação Vertical (D-pad Cima / Baixo)
-            if (pressed & SCE_CTRL_UP) {
-                if (settingsSelectedIndex > 0) settingsSelectedIndex--;
-            }
-            if (pressed & SCE_CTRL_DOWN) {
-                if (settingsSelectedIndex < totalSettingsItems - 1) settingsSelectedIndex++;
-            }
-
-            // Alternância de Valores (D-pad Esquerda / Direita ou Cruz)
-            bool changePrev = (pressed & SCE_CTRL_LEFT);
-            bool changeNext = (pressed & (SCE_CTRL_RIGHT | SCE_CTRL_CROSS));
-
-            if (settingsSelectedIndex == 0) {
-                // Item 0: Seleção de Tema (Cards Horizontais)
-                if (pressed & SCE_CTRL_LEFT) {
-                    if (settingsThemeCursor > 0) {
-                        settingsThemeCursor--;
-                        appConfig.theme = static_cast<ThemeId>(settingsThemeCursor);
-                        ThemeManager::apply(appConfig.theme);
-                        ConfigManager::getInstance().save();
-                    }
-                }
-                if (pressed & SCE_CTRL_RIGHT) {
-                    if (settingsThemeCursor < themeCount - 1) {
-                        settingsThemeCursor++;
-                        appConfig.theme = static_cast<ThemeId>(settingsThemeCursor);
-                        ThemeManager::apply(appConfig.theme);
-                        ConfigManager::getInstance().save();
-                    }
+            if (showClearCoversConfirm) {
+                if (pressed & (SCE_CTRL_LEFT | SCE_CTRL_RIGHT)) {
+                    clearCoversConfirmYesSelected = !clearCoversConfirmYesSelected;
                 }
                 if (pressed & SCE_CTRL_CROSS) {
-                    appConfig.theme = static_cast<ThemeId>(settingsThemeCursor);
-                    ThemeManager::apply(appConfig.theme);
+                    if (clearCoversConfirmYesSelected) {
+                        CoverManager::getInstance().clearCoverCacheOnDisk();
+                    }
+                    showClearCoversConfirm = false;
+                }
+                if (pressed & SCE_CTRL_CIRCLE) {
+                    showClearCoversConfirm = false;
+                }
+                if (touchDown) {
+                    UIConfirmDialogLayout dlg = UIComponents::getConfirmDialogLayout();
+                    float tx = static_cast<float>(touchX);
+                    float ty = static_cast<float>(touchY);
+                    if (dlg.yesBtn.contains(tx, ty)) {
+                        CoverManager::getInstance().clearCoverCacheOnDisk();
+                        showClearCoversConfirm = false;
+                    } else if (dlg.noBtn.contains(tx, ty)) {
+                        showClearCoversConfirm = false;
+                    }
+                }
+            } else {
+                // Navegação Vertical (D-pad Cima / Baixo)
+                if (pressed & SCE_CTRL_UP) {
+                    if (settingsSelectedIndex > 0) settingsSelectedIndex--;
+                }
+                if (pressed & SCE_CTRL_DOWN) {
+                    if (settingsSelectedIndex < totalSettingsItems - 1) settingsSelectedIndex++;
+                }
+
+                // Alternância de Valores (D-pad Esquerda / Direita ou Cruz)
+                bool changePrev = (pressed & SCE_CTRL_LEFT);
+                bool changeNext = (pressed & (SCE_CTRL_RIGHT | SCE_CTRL_CROSS));
+
+                if (settingsSelectedIndex == 0) {
+                    // Item 0: Seleção de Tema (Cards Horizontais)
+                    if (pressed & SCE_CTRL_LEFT) {
+                        if (settingsThemeCursor > 0) {
+                            settingsThemeCursor--;
+                            appConfig.theme = static_cast<ThemeId>(settingsThemeCursor);
+                            ThemeManager::apply(appConfig.theme);
+                            ConfigManager::getInstance().save();
+                        }
+                    }
+                    if (pressed & SCE_CTRL_RIGHT) {
+                        if (settingsThemeCursor < themeCount - 1) {
+                            settingsThemeCursor++;
+                            appConfig.theme = static_cast<ThemeId>(settingsThemeCursor);
+                            ThemeManager::apply(appConfig.theme);
+                            ConfigManager::getInstance().save();
+                        }
+                    }
+                    if (pressed & SCE_CTRL_CROSS) {
+                        appConfig.theme = static_cast<ThemeId>(settingsThemeCursor);
+                        ThemeManager::apply(appConfig.theme);
+                        ConfigManager::getInstance().save();
+                    }
+                } else if (changePrev || changeNext) {
+                    switch (settingsSelectedIndex) {
+                        case 1: // Modo de Exibição (Lista / Grade)
+                            appConfig.isGridView = !appConfig.isGridView;
+                            isGridView = appConfig.isGridView;
+                            selectedIndex = 0;
+                            scrollOffset = 0;
+                            smoothScrollOffset = 0.0f;
+                            break;
+                        case 2: { // Ordenação Padrão
+                            int count = static_cast<int>(SortMode::COUNT);
+                            int cur = static_cast<int>(appConfig.sortMode);
+                            if (changeNext) cur = (cur + 1) % count;
+                            else cur = (cur - 1 + count) % count;
+                            appConfig.sortMode = static_cast<SortMode>(cur);
+                            currentSort = appConfig.sortMode;
+                            FileBrowser::sortItems(allItems, currentSort);
+                            visibleItems = FileBrowser::filterItems(allItems, searchQuery);
+                            selectedIndex = 0;
+                            scrollOffset = 0;
+                            smoothScrollOffset = 0.0f;
+                            break;
+                        }
+                        case 3: { // Gerar Miniaturas da Biblioteca (em lote)
+                            if (pressed & (SCE_CTRL_CROSS | SCE_CTRL_RIGHT)) {
+                                int totalFiles = static_cast<int>(allItems.size());
+                                int generatedCount = 0;
+                                bool cancelled = false;
+
+                                for (int i = 0; i < totalFiles; i++) {
+                                    sceCtrlPeekBufferPositive(0, &pad, 1);
+                                    if (pad.buttons & SCE_CTRL_CIRCLE) {
+                                        cancelled = true;
+                                        break;
+                                    }
+
+                                    const auto& curItem = allItems[i];
+
+                                    startDrawing();
+                                    vita2d_clear_screen();
+                                    UIComponents::drawSettingsScreen(settingsSelectedIndex, appConfig, settingsSmoothScrollY, settingsSmoothThemeScrollX, settingsThemeCursor);
+                                    UIComponents::drawCoverProgressModal(i + 1, totalFiles, curItem.filename, generatedCount);
+                                    endDrawing();
+
+                                    if (curItem.type != FileType::TXT && !CoverManager::getInstance().hasCoverOnDisk(curItem.fullPath)) {
+                                        if (CoverManager::getInstance().generateCover(curItem.fullPath)) {
+                                            generatedCount++;
+                                        }
+                                    }
+                                }
+
+                                if (!cancelled && totalFiles > 0) {
+                                    startDrawing();
+                                    vita2d_clear_screen();
+                                    UIComponents::drawSettingsScreen(settingsSelectedIndex, appConfig, settingsSmoothScrollY, settingsSmoothThemeScrollX, settingsThemeCursor);
+                                    UIComponents::drawCoverProgressModal(totalFiles, totalFiles, "Concluído com sucesso!", generatedCount);
+                                    endDrawing();
+                                    sceKernelDelayThread(800000);
+                                }
+                                CoverManager::getInstance().refreshDiskIndex();
+                                CoverManager::getInstance().clearAllTextures();
+                            }
+                            break;
+                        }
+                        case 4: { // Limpar Cache de Capas
+                            if (pressed & (SCE_CTRL_CROSS | SCE_CTRL_RIGHT)) {
+                                showClearCoversConfirm = true;
+                                clearCoversConfirmYesSelected = false;
+                            }
+                            break;
+                        }
+                        case 5: // Orientação do Leitor
+                            appConfig.readerRotated = !appConfig.readerRotated;
+                            readerRotated = appConfig.readerRotated;
+                            UIComponents::setRotated(readerRotated);
+                            readerTxt.setRotated(readerRotated, pgf);
+                            readerCbz.setRotated(readerRotated);
+                            readerEpub.setRotated(readerRotated);
+                            break;
+                        case 6: { // Modo de Rolagem
+                            int count = static_cast<int>(ReaderScrollMode::COUNT);
+                            int cur = static_cast<int>(appConfig.readerScrollMode);
+                            if (changeNext) cur = (cur + 1) % count;
+                            else cur = (cur - 1 + count) % count;
+                            appConfig.readerScrollMode = static_cast<ReaderScrollMode>(cur);
+                            readerTxt.setScrollMode(appConfig.readerScrollMode);
+                            readerCbz.setScrollMode(appConfig.readerScrollMode);
+                            readerEpub.setScrollMode(appConfig.readerScrollMode);
+                            break;
+                        }
+                        case 7: { // Transição de Página
+                            int count = static_cast<int>(PageTransition::COUNT);
+                            int cur = static_cast<int>(appConfig.pageTransition);
+                            if (changeNext) cur = (cur + 1) % count;
+                            else cur = (cur - 1 + count) % count;
+                            appConfig.pageTransition = static_cast<PageTransition>(cur);
+                            readerTxt.setPageTransition(appConfig.pageTransition);
+                            readerCbz.setPageTransition(appConfig.pageTransition);
+                            readerEpub.setPageTransition(appConfig.pageTransition);
+                            break;
+                        }
+                        case 8: // Exibir Número de Páginas
+                            appConfig.showPageNumbers = !appConfig.showPageNumbers;
+                            break;
+                        case 9: // Tamanho de Fonte Padrão (EPUB)
+                            if (changeNext) {
+                                if (appConfig.epubFontSize < 44) appConfig.epubFontSize += 2;
+                            } else {
+                                if (appConfig.epubFontSize > 14) appConfig.epubFontSize -= 2;
+                            }
+                            break;
+                    }
                     ConfigManager::getInstance().save();
                 }
-            } else if (changePrev || changeNext) {
-                switch (settingsSelectedIndex) {
-                    case 1: // Modo de Exibição (Lista / Grade)
-                        appConfig.isGridView = !appConfig.isGridView;
-                        isGridView = appConfig.isGridView;
-                        selectedIndex = 0;
-                        scrollOffset = 0;
-                        smoothScrollOffset = 0.0f;
-                        break;
-                    case 2: { // Ordenação Padrão
-                        int count = static_cast<int>(SortMode::COUNT);
-                        int cur = static_cast<int>(appConfig.sortMode);
-                        if (changeNext) cur = (cur + 1) % count;
-                        else cur = (cur - 1 + count) % count;
-                        appConfig.sortMode = static_cast<SortMode>(cur);
-                        currentSort = appConfig.sortMode;
-                        FileBrowser::sortItems(allItems, currentSort);
-                        visibleItems = FileBrowser::filterItems(allItems, searchQuery);
-                        selectedIndex = 0;
-                        scrollOffset = 0;
-                        smoothScrollOffset = 0.0f;
-                        break;
-                    }
-                    case 3: // Orientação do Leitor
-                        appConfig.readerRotated = !appConfig.readerRotated;
-                        readerRotated = appConfig.readerRotated;
-                        UIComponents::setRotated(readerRotated);
-                        readerTxt.setRotated(readerRotated, pgf);
-                        readerCbz.setRotated(readerRotated);
-                        readerEpub.setRotated(readerRotated);
-                        break;
-                    case 4: { // Modo de Rolagem
-                        int count = static_cast<int>(ReaderScrollMode::COUNT);
-                        int cur = static_cast<int>(appConfig.readerScrollMode);
-                        if (changeNext) cur = (cur + 1) % count;
-                        else cur = (cur - 1 + count) % count;
-                        appConfig.readerScrollMode = static_cast<ReaderScrollMode>(cur);
-                        readerTxt.setScrollMode(appConfig.readerScrollMode);
-                        readerCbz.setScrollMode(appConfig.readerScrollMode);
-                        readerEpub.setScrollMode(appConfig.readerScrollMode);
-                        break;
-                    }
-                    case 5: { // Transição de Página
-                        int count = static_cast<int>(PageTransition::COUNT);
-                        int cur = static_cast<int>(appConfig.pageTransition);
-                        if (changeNext) cur = (cur + 1) % count;
-                        else cur = (cur - 1 + count) % count;
-                        appConfig.pageTransition = static_cast<PageTransition>(cur);
-                        readerTxt.setPageTransition(appConfig.pageTransition);
-                        readerCbz.setPageTransition(appConfig.pageTransition);
-                        readerEpub.setPageTransition(appConfig.pageTransition);
-                        break;
-                    }
-                    case 6: // Exibir Número de Páginas
-                        appConfig.showPageNumbers = !appConfig.showPageNumbers;
-                        break;
-                    case 7: // Tamanho de Fonte Padrão (EPUB)
-                        if (changeNext) {
-                            if (appConfig.epubFontSize < 44) appConfig.epubFontSize += 2;
-                        } else {
-                            if (appConfig.epubFontSize > 14) appConfig.epubFontSize -= 2;
-                        }
-                        break;
-                }
-                ConfigManager::getInstance().save();
             }
 
             // Animação de Scroll Vertical na tela de configurações (acompanha o item focado)
@@ -1412,6 +1513,48 @@ int main(int argc, char* argv[]) {
                         ConfigManager::getInstance().save();
                     } else if (settingsLayout.item3.contains(tx, ty)) {
                         settingsSelectedIndex = 3;
+                        int totalFiles = static_cast<int>(allItems.size());
+                        int generatedCount = 0;
+                        bool cancelled = false;
+
+                        for (int i = 0; i < totalFiles; i++) {
+                            sceCtrlPeekBufferPositive(0, &pad, 1);
+                            if (pad.buttons & SCE_CTRL_CIRCLE) {
+                                cancelled = true;
+                                break;
+                            }
+
+                            const auto& curItem = allItems[i];
+
+                            startDrawing();
+                            vita2d_clear_screen();
+                            UIComponents::drawSettingsScreen(settingsSelectedIndex, appConfig, settingsSmoothScrollY, settingsSmoothThemeScrollX, settingsThemeCursor);
+                            UIComponents::drawCoverProgressModal(i + 1, totalFiles, curItem.filename, generatedCount);
+                            endDrawing();
+
+                            if (curItem.type != FileType::TXT && !CoverManager::getInstance().hasCoverOnDisk(curItem.fullPath)) {
+                                if (CoverManager::getInstance().generateCover(curItem.fullPath)) {
+                                    generatedCount++;
+                                }
+                            }
+                        }
+
+                        if (!cancelled && totalFiles > 0) {
+                            startDrawing();
+                            vita2d_clear_screen();
+                            UIComponents::drawSettingsScreen(settingsSelectedIndex, appConfig, settingsSmoothScrollY, settingsSmoothThemeScrollX, settingsThemeCursor);
+                            UIComponents::drawCoverProgressModal(totalFiles, totalFiles, "Concluído com sucesso!", generatedCount);
+                            endDrawing();
+                            sceKernelDelayThread(800000);
+                        }
+                        CoverManager::getInstance().refreshDiskIndex();
+                        CoverManager::getInstance().clearAllTextures();
+                    } else if (settingsLayout.item4.contains(tx, ty)) {
+                        settingsSelectedIndex = 4;
+                        showClearCoversConfirm = true;
+                        clearCoversConfirmYesSelected = false;
+                    } else if (settingsLayout.item5.contains(tx, ty)) {
+                        settingsSelectedIndex = 5;
                         appConfig.readerRotated = !appConfig.readerRotated;
                         readerRotated = appConfig.readerRotated;
                         UIComponents::setRotated(readerRotated);
@@ -1419,8 +1562,8 @@ int main(int argc, char* argv[]) {
                         readerCbz.setRotated(readerRotated);
                         readerEpub.setRotated(readerRotated);
                         ConfigManager::getInstance().save();
-                    } else if (settingsLayout.item4.contains(tx, ty)) {
-                        settingsSelectedIndex = 4;
+                    } else if (settingsLayout.item6.contains(tx, ty)) {
+                        settingsSelectedIndex = 6;
                         int count = static_cast<int>(ReaderScrollMode::COUNT);
                         int cur = (static_cast<int>(appConfig.readerScrollMode) + 1) % count;
                         appConfig.readerScrollMode = static_cast<ReaderScrollMode>(cur);
@@ -1428,8 +1571,8 @@ int main(int argc, char* argv[]) {
                         readerCbz.setScrollMode(appConfig.readerScrollMode);
                         readerEpub.setScrollMode(appConfig.readerScrollMode);
                         ConfigManager::getInstance().save();
-                    } else if (settingsLayout.item5.contains(tx, ty)) {
-                        settingsSelectedIndex = 5;
+                    } else if (settingsLayout.item7.contains(tx, ty)) {
+                        settingsSelectedIndex = 7;
                         int count = static_cast<int>(PageTransition::COUNT);
                         int cur = (static_cast<int>(appConfig.pageTransition) + 1) % count;
                         appConfig.pageTransition = static_cast<PageTransition>(cur);
@@ -1437,12 +1580,12 @@ int main(int argc, char* argv[]) {
                         readerCbz.setPageTransition(appConfig.pageTransition);
                         readerEpub.setPageTransition(appConfig.pageTransition);
                         ConfigManager::getInstance().save();
-                    } else if (settingsLayout.item6.contains(tx, ty)) {
-                        settingsSelectedIndex = 6;
+                    } else if (settingsLayout.item8.contains(tx, ty)) {
+                        settingsSelectedIndex = 8;
                         appConfig.showPageNumbers = !appConfig.showPageNumbers;
                         ConfigManager::getInstance().save();
-                    } else if (settingsLayout.item7.contains(tx, ty)) {
-                        settingsSelectedIndex = 7;
+                    } else if (settingsLayout.item9.contains(tx, ty)) {
+                        settingsSelectedIndex = 9;
                         if (tx > settingsLayout.fontValueSplitX) {
                             if (appConfig.epubFontSize < 44) appConfig.epubFontSize += 2;
                         } else {
@@ -1454,8 +1597,12 @@ int main(int argc, char* argv[]) {
             }
 
             // Voltar para o estado de origem (MENU ou leitor)
-            if (pressed & SCE_CTRL_CIRCLE) {
+            if (!showClearCoversConfirm && (pressed & SCE_CTRL_CIRCLE)) {
                 ConfigManager::getInstance().save();
+                if (settingsReturnState == AppState::MENU) {
+                    CoverManager::getInstance().refreshDiskIndex();
+                    CoverManager::getInstance().clearAllTextures();
+                }
                 currentState = settingsReturnState;
                 settingsReturnState = AppState::MENU;
                 currentFocus = FocusArea::CONTENT;
@@ -1464,6 +1611,9 @@ int main(int argc, char* argv[]) {
             startDrawing();
             vita2d_clear_screen();
             UIComponents::drawSettingsScreen(settingsSelectedIndex, appConfig, settingsSmoothScrollY, settingsSmoothThemeScrollX, settingsThemeCursor);
+            if (showClearCoversConfirm) {
+                UIComponents::drawConfirmDialog("Limpar Cache de Capas", "Deseja excluir todas as capas salvas?", clearCoversConfirmYesSelected);
+            }
             endDrawing();
 
         } else if (currentState == AppState::READ_TXT) {

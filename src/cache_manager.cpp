@@ -63,9 +63,14 @@ void CacheManager::cleanupAllReaderSessions() {
     FileUtils::makeDirRecursive(m_readerDir);
 }
 
+void CacheManager::cleanupAllCovers() {
+    FileUtils::removeDirRecursive(m_coverDir);
+    FileUtils::makeDirRecursive(m_coverDir);
+}
+
 std::string CacheManager::getCoverFilePath(const std::string& bookPath) {
     std::string fileName = FileUtils::getFileName(bookPath);
     std::hash<std::string> hasher;
     size_t hashValue = hasher(bookPath);
-    return m_coverDir + "/" + std::to_string(hashValue) + "_" + fileName + ".png";
+    return m_coverDir + "/" + std::to_string(hashValue) + "_" + fileName + ".jpg";
 }

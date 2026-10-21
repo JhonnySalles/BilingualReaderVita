@@ -34,6 +34,9 @@ bool removeDirRecursive(const std::string& path);
 // Copia arquivo de src para dst
 bool copyFile(const std::string& src, const std::string& dst);
 
+// Remove um arquivo específico do disco
+bool removeFile(const std::string& path);
+
 // Gera uma string randômica alfanumérica (ex: para sessões de leitura no cache)
 std::string generateRandomId(size_t length = 8);
 

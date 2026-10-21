@@ -174,3 +174,31 @@ bool ParseRar::isDoublePage(size_t index) {
     }
     return false;
 }
+
+bool ParseRar::extractFirstImage(const std::string& rarPath, const std::string& outImagePath) {
+    if (rarPath.empty() || outImagePath.empty()) return false;
+
+    RAROpenArchiveDataEx arcData = {0};
+    arcData.ArcName = (char*)rarPath.c_str();
+    arcData.OpenMode = RAR_OM_EXTRACT;
+
+    HANDLE hArc = RAROpenArchiveEx(&arcData);
+    if (!hArc || arcData.OpenResult != ERAR_SUCCESS) return false;
+
+    RARHeaderDataEx headerData = {0};
+    bool extracted = false;
+
+    while (RARReadHeaderEx(hArc, &headerData) == ERAR_SUCCESS) {
+        if (FileUtils::isImageFile(headerData.FileName)) {
+            int res = RARProcessFile(hArc, RAR_EXTRACT, NULL, (char*)outImagePath.c_str());
+            if (res == ERAR_SUCCESS) {
+                extracted = true;
+                break;
+            }
+        }
+        RARProcessFile(hArc, RAR_SKIP, NULL, NULL);
+    }
+
+    RARCloseArchive(hArc);
+    return extracted;
+}

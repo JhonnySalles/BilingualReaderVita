@@ -23,6 +23,9 @@ public:
     vita2d_texture* loadPageThumbnail(size_t index, int maxW = 90, int maxH = 130) override;
     bool isDoublePage(size_t index) override;
 
+    // Extrai apenas a primeira imagem do arquivo RAR sem descompactar o restante
+    static bool extractFirstImage(const std::string& rarPath, const std::string& outImagePath);
+
 private:
     std::string m_filePath;
     std::string m_cacheDir;

@@ -171,4 +171,9 @@ bool copyFile(const std::string& src, const std::string& dst) {
     return true;
 }
 
+bool removeFile(const std::string& path) {
+    if (path.empty()) return false;
+    return std::remove(path.c_str()) == 0;
+}
+
 } // namespace FileUtils

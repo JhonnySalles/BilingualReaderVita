@@ -28,6 +28,9 @@ public:
     // Limpa todo o cache de leitura temporário
     void cleanupAllReaderSessions();
 
+    // Limpa todas as capas salvas em cache
+    void cleanupAllCovers();
+
     // Retorna o caminho esperado da capa para um arquivo de livro/manga
     std::string getCoverFilePath(const std::string& bookPath);
 

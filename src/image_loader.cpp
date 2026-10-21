@@ -1,4 +1,7 @@
 #include "image_loader.h"
+#include "file_utils.h"
+#include "parses/parse_rar.h"
+#include "parses/parse_tar.h"
 #include <cstdio>
 #include <vector>
 #include <algorithm>
@@ -384,6 +387,104 @@ bool getImageDimensionsFromFile(const std::string& filePath, int& outW, int& out
     }
 
     return success;
+}
+
+bool saveResizedThumbnail(const std::string& imagePath, const std::string& outThumbnailPath, int maxW, int maxH) {
+    if (imagePath.empty() || outThumbnailPath.empty()) return false;
+
+    fz_context* ctx = getFzContext();
+    if (!ctx) return false;
+
+    fz_document* doc = nullptr;
+    fz_page* page = nullptr;
+    fz_pixmap* pix = nullptr;
+    bool success = false;
+
+    fz_try(ctx) {
+        doc = fz_open_document(ctx, imagePath.c_str());
+        if (doc && fz_count_pages(ctx, doc) > 0) {
+            page = fz_load_page(ctx, doc, 0);
+            if (page) {
+                fz_rect bounds = fz_bound_page(ctx, page);
+                float pageW = bounds.x1 - bounds.x0;
+                float pageH = bounds.y1 - bounds.y0;
+                if (pageW > 0.0f && pageH > 0.0f) {
+                    float scale = std::min((float)maxW / pageW, (float)maxH / pageH);
+                    if (scale > 1.0f) scale = 1.0f;
+                    if (scale < 0.01f) scale = 0.01f;
+
+                    fz_matrix ctm = fz_scale(scale, scale);
+                    fz_irect ibounds = fz_round_rect(fz_transform_rect(bounds, ctm));
+
+                    fz_colorspace* cs = fz_device_rgb(ctx);
+                    pix = fz_new_pixmap_with_bbox(ctx, cs, ibounds, NULL, 0);
+                    fz_clear_pixmap_with_value(ctx, pix, 0xFF);
+
+                    fz_device* dev = fz_new_draw_device(ctx, ctm, pix);
+                    fz_run_page(ctx, page, dev, fz_identity, NULL);
+                    fz_close_device(ctx, dev);
+                    fz_drop_device(ctx, dev);
+
+                    fz_save_pixmap_as_jpeg(ctx, pix, outThumbnailPath.c_str(), 80);
+                    success = true;
+                }
+                fz_drop_page(ctx, page);
+                page = nullptr;
+            }
+            fz_drop_document(ctx, doc);
+            doc = nullptr;
+        }
+    }
+    fz_catch(ctx) {
+        if (page) fz_drop_page(ctx, page);
+        if (doc) fz_drop_document(ctx, doc);
+        if (pix) fz_drop_pixmap(ctx, pix);
+        return false;
+    }
+
+    if (pix) {
+        fz_drop_pixmap(ctx, pix);
+    }
+    return success;
+}
+
+bool generateCoverThumbnail(const std::string& bookPath, const std::string& outThumbnailPath, int maxW, int maxH) {
+    if (bookPath.empty() || outThumbnailPath.empty()) return false;
+
+    std::string ext = FileUtils::getExtension(bookPath);
+    std::transform(ext.begin(), ext.end(), ext.begin(), ::toupper);
+
+    if (ext == "TXT") {
+        return false;
+    }
+
+    if (ext == "CBR" || ext == "RAR") {
+        std::string tmpImg = outThumbnailPath + ".tmp";
+        if (ParseRar::extractFirstImage(bookPath, tmpImg)) {
+            bool ok = saveResizedThumbnail(tmpImg, outThumbnailPath, maxW, maxH);
+            FileUtils::removeFile(tmpImg);
+            return ok;
+        }
+        return false;
+    }
+
+    if (ext == "CBT" || ext == "TAR") {
+        ParseTar tar;
+        if (tar.open(bookPath)) {
+            std::string tmpImg = outThumbnailPath + ".tmp";
+            if (tar.extractCover(tmpImg)) {
+                bool ok = saveResizedThumbnail(tmpImg, outThumbnailPath, maxW, maxH);
+                FileUtils::removeFile(tmpImg);
+                tar.close();
+                return ok;
+            }
+            tar.close();
+        }
+        return false;
+    }
+
+    // Para CBZ, ZIP, EPUB, PDF, XPS, FB2
+    return saveResizedThumbnail(bookPath, outThumbnailPath, maxW, maxH);
 }
 
 }

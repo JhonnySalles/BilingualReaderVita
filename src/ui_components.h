@@ -61,11 +61,13 @@ struct UISettingsLayout {
     UIRect item0;   // Tema (Horizontal Cards container)
     UIRect item1;   // Modo de Exibição
     UIRect item2;   // Ordenação Padrão
-    UIRect item3;   // Orientação do Leitor
-    UIRect item4;   // Modo de Rolagem
-    UIRect item5;   // Transição de Página
-    UIRect item6;   // Exibir Número de Páginas
-    UIRect item7;   // Tamanho de Fonte Padrão
+    UIRect item3;   // Gerar Miniaturas da Biblioteca
+    UIRect item4;   // Limpar Cache de Capas
+    UIRect item5;   // Orientação do Leitor
+    UIRect item6;   // Modo de Rolagem
+    UIRect item7;   // Transição de Página
+    UIRect item8;   // Exibir Número de Páginas
+    UIRect item9;   // Tamanho de Fonte Padrão
     float fontValueSplitX = 600.0f;
     float contentTotalH = 500.0f;
 
@@ -155,9 +157,9 @@ public:
         return RGBA8(r, g, b, newA);
     }
 
-    // Renderização dos Itens com suporte a Alpha
-    static void drawListCard(float x, float y, float w, float h, bool isSelected, const LibraryItem& item, float alpha = 1.0f);
-    static void drawGridCard(float x, float y, float w, float h, bool isSelected, const LibraryItem& item, float alpha = 1.0f);
+    // Renderização dos Itens com suporte a Alpha e Capas
+    static void drawListCard(float x, float y, float w, float h, bool isSelected, const LibraryItem& item, float alpha = 1.0f, vita2d_texture* coverTex = nullptr);
+    static void drawGridCard(float x, float y, float w, float h, bool isSelected, const LibraryItem& item, float alpha = 1.0f, vita2d_texture* coverTex = nullptr);
 
     // Barra de rolagem da biblioteca
     static void drawLibraryScrollBar(float currentOffset, int totalItems, int visibleCapacity, bool isGridView, float alpha = 1.0f);
@@ -167,6 +169,7 @@ public:
 
     // Diálogo de Progresso / Carregamento (Popup)
     static void drawProgressPopup(const std::string& title, const std::string& message, float progress = -1.0f);
+    static void drawCoverProgressModal(int current, int total, const std::string& currentFileName, int generatedCount);
 
     // Utilitários
     static void drawFooter(const std::string& controlsHint, bool showBookNav = false);
