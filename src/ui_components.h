@@ -109,6 +109,16 @@ namespace UITheme {
     constexpr unsigned int BadgeCB7        = RGBA8(168, 85, 247, 255);  // Roxo
     constexpr unsigned int Badge7Z         = RGBA8(126, 34, 206, 255);  // Roxo escuro
     constexpr unsigned int BadgeEPUB       = RGBA8(59, 130, 246, 255);  // Azul
+    constexpr unsigned int BadgePDF        = RGBA8(220, 38, 38, 255);   // Vermelho PDF
+    constexpr unsigned int BadgeFB2        = RGBA8(234, 88, 12, 255);   // Laranja
+    constexpr unsigned int BadgeMOBI       = RGBA8(14, 165, 233, 255);  // Azul Céu (Kindle)
+    constexpr unsigned int BadgeDOCX       = RGBA8(37, 99, 235, 255);   // Azul Word
+    constexpr unsigned int BadgeHTMLZ      = RGBA8(13, 148, 136, 255);  // Teal / Ciano escuro
+    constexpr unsigned int BadgeTXTZ       = RGBA8(194, 65, 12, 255);   // Laranja queimado
+    constexpr unsigned int BadgePMLZ       = RGBA8(79, 70, 229, 255);   // Índigo
+    constexpr unsigned int BadgeTCR        = RGBA8(180, 83, 9, 255);    // Âmbar escuro
+    constexpr unsigned int BadgeHTML       = RGBA8(249, 115, 22, 255);  // Laranja HTML5
+    constexpr unsigned int BadgeMD         = RGBA8(107, 114, 128, 255); // Cinza Markdown
     constexpr unsigned int FavoriteGold    = RGBA8(250, 204, 21, 255);  // Dourado
 }
 
@@ -175,6 +185,7 @@ public:
     static void drawFooter(const std::string& controlsHint, bool showBookNav = false);
     static void drawReaderTopBar(const std::string& title, const std::string& extraInfo, bool isRotated, bool showLinkedPage = false, unsigned int badgeColor = UITheme::Primary);
     static void drawBadge(float x, float y, const std::string& type, float scale = 1.0f, float alpha = 1.0f);
+    static float getBadgeWidth(const std::string& type, float scale = 1.0f);
     static void drawStar(float x, float y, float size, unsigned int color);
 
     // Barra de progresso de leitura (HUD inferior do leitor)

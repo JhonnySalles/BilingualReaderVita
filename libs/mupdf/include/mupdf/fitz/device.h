@@ -1,4 +1,4 @@
-// Copyright (C) 2004-2023 Artifex Software, Inc.
+// Copyright (C) 2004-2025 Artifex Software, Inc.
 //
 // This file is part of MuPDF.
 //
@@ -30,6 +30,7 @@
 #include "mupdf/fitz/shade.h"
 #include "mupdf/fitz/path.h"
 #include "mupdf/fitz/text.h"
+#include "mupdf/fitz/options.h"
 
 /**
 	The different format handlers (pdf, xps etc) interpret pages to
@@ -58,12 +59,9 @@ enum
 	FZ_DEVFLAG_LINEJOIN_UNDEFINED = 256,
 	FZ_DEVFLAG_MITERLIMIT_UNDEFINED = 512,
 	FZ_DEVFLAG_LINEWIDTH_UNDEFINED = 1024,
-	/* Arguably we should have a bit for the dash pattern itself
-	 * being undefined, but that causes problems; do we assume that
-	 * it should always be set to non-dashing at the start of every
-	 * glyph? */
 	FZ_DEVFLAG_BBOX_DEFINED = 2048,
 	FZ_DEVFLAG_GRIDFIT_AS_TILED = 4096,
+	FZ_DEVFLAG_DASH_PATTERN_UNDEFINED = 8192,
 };
 
 enum
@@ -105,6 +103,63 @@ int fz_lookup_blendmode(const char *name);
 	The string is static, with arbitrary lifespan.
 */
 const char *fz_blendmode_name(int blendmode);
+
+/*
+	Generic function type.
+
+	Different function implementations will derive from this.
+*/
+typedef struct fz_function fz_function;
+
+typedef void (fz_function_eval_fn)(fz_context *, fz_function *, const float *, float *);
+
+enum
+{
+	FZ_FUNCTION_MAX_N = FZ_MAX_COLORS,
+	FZ_FUNCTION_MAX_M = FZ_MAX_COLORS
+};
+
+struct fz_function
+{
+	fz_storable storable;
+	size_t size;
+	int m;					/* number of input values */
+	int n;					/* number of output values */
+
+	fz_function_eval_fn *eval;
+};
+
+fz_function *fz_new_function_of_size(fz_context *ctx, int size, size_t size2, int m, int n, fz_function_eval_fn *eval, fz_store_drop_fn *drop);
+
+#define fz_new_derived_function(CTX,TYPE,SIZE,M,N,EVAL,DROP) \
+	((TYPE*)Memento_label(fz_new_function_of_size(CTX,sizeof(TYPE),SIZE,M,N,EVAL,DROP), #TYPE))
+
+/*
+	Evaluate a function.
+
+	Input vector = (in[0], ..., in[inlen-1])
+	Output vector = (out[0], ..., out[outlen-1])
+
+	If inlen or outlen do not match that expected by the function, this
+	routine will truncate or extend the input/output (with 0's) as
+	required.
+*/
+void fz_eval_function(fz_context *ctx, fz_function *func, const float *in, int inlen, float *out, int outlen);
+
+/*
+	Keep a function reference.
+*/
+fz_function *fz_keep_function(fz_context *ctx, fz_function *func);
+
+/*
+	Drop a function reference.
+*/
+void fz_drop_function(fz_context *ctx, fz_function *func);
+
+/*
+	Function size
+*/
+size_t fz_function_size(fz_context *ctx, fz_function *func);
 
 /**
 	The device structure is public to allow devices to be
@@ -259,11 +314,11 @@ struct fz_device
 	void (*pop_clip)(fz_context *, fz_device *);
 
 	void (*begin_mask)(fz_context *, fz_device *, fz_rect area, int luminosity, fz_colorspace *, const float *bc, fz_color_params );
-	void (*end_mask)(fz_context *, fz_device *);
+	void (*end_mask)(fz_context *, fz_device *, fz_function *fn);
 	void (*begin_group)(fz_context *, fz_device *, fz_rect area, fz_colorspace *cs, int isolated, int knockout, int blendmode, float alpha);
 	void (*end_group)(fz_context *, fz_device *);
 
-	int (*begin_tile)(fz_context *, fz_device *, fz_rect area, fz_rect view, float xstep, float ystep, fz_matrix ctm, int id);
+	int (*begin_tile)(fz_context *, fz_device *, fz_rect area, fz_rect view, float xstep, float ystep, fz_matrix ctm, int id, int doc_id);
 	void (*end_tile)(fz_context *, fz_device *);
 
 	void (*render_flags)(fz_context *, fz_device *, int set, int clear);
@@ -272,7 +327,7 @@ struct fz_device
 	void (*begin_layer)(fz_context *, fz_device *, const char *layer_name);
 	void (*end_layer)(fz_context *, fz_device *);
 
-	void (*begin_structure)(fz_context *, fz_device *, fz_structure standard, const char *raw, int uid);
+	void (*begin_structure)(fz_context *, fz_device *, fz_structure standard, const char *raw, int idx);
 	void (*end_structure)(fz_context *, fz_device *);
 
 	void (*begin_metatext)(fz_context *, fz_device *, fz_metatext meta, const char *text);
@@ -283,6 +338,9 @@ struct fz_device
 	int container_len;
 	int container_cap;
 	fz_device_container_stack *container;
+
+	/* For simplicity, every device has a passthrough entry, but not every device uses it. */
+	fz_device *passthrough;
 };
 
 /**
@@ -304,16 +362,18 @@ void fz_fill_image_mask(fz_context *ctx, fz_device *dev, fz_image *image, fz_mat
 void fz_clip_image_mask(fz_context *ctx, fz_device *dev, fz_image *image, fz_matrix ctm, fz_rect scissor);
 void fz_begin_mask(fz_context *ctx, fz_device *dev, fz_rect area, int luminosity, fz_colorspace *colorspace, const float *bc, fz_color_params color_params);
 void fz_end_mask(fz_context *ctx, fz_device *dev);
+void fz_end_mask_tr(fz_context *ctx, fz_device *dev, fz_function *fn);
 void fz_begin_group(fz_context *ctx, fz_device *dev, fz_rect area, fz_colorspace *cs, int isolated, int knockout, int blendmode, float alpha);
 void fz_end_group(fz_context *ctx, fz_device *dev);
 void fz_begin_tile(fz_context *ctx, fz_device *dev, fz_rect area, fz_rect view, float xstep, float ystep, fz_matrix ctm);
 int fz_begin_tile_id(fz_context *ctx, fz_device *dev, fz_rect area, fz_rect view, float xstep, float ystep, fz_matrix ctm, int id);
+int fz_begin_tile_tid(fz_context *ctx, fz_device *dev, fz_rect area, fz_rect view, float xstep, float ystep, fz_matrix ctm, int id, int doc_id);
 void fz_end_tile(fz_context *ctx, fz_device *dev);
 void fz_render_flags(fz_context *ctx, fz_device *dev, int set, int clear);
 void fz_set_default_colorspaces(fz_context *ctx, fz_device *dev, fz_default_colorspaces *default_cs);
 void fz_begin_layer(fz_context *ctx, fz_device *dev, const char *layer_name);
 void fz_end_layer(fz_context *ctx, fz_device *dev);
-void fz_begin_structure(fz_context *ctx, fz_device *dev, fz_structure standard, const char *raw, int uid);
+void fz_begin_structure(fz_context *ctx, fz_device *dev, fz_structure standard, const char *raw, int idx);
 void fz_end_structure(fz_context *ctx, fz_device *dev);
 void fz_begin_metatext(fz_context *ctx, fz_device *dev, fz_metatext meta, const char *text);
 void fz_end_metatext(fz_context *ctx, fz_device *dev);
@@ -328,6 +388,20 @@ void fz_end_metatext(fz_context *ctx, fz_device *dev);
 fz_device *fz_new_device_of_size(fz_context *ctx, int size);
 #define fz_new_derived_device(CTX, TYPE) \
 	((TYPE *)Memento_label(fz_new_device_of_size(ctx,sizeof(TYPE)),#TYPE))
+
+/**
+	Create a passthrough device.
+
+	The device is created with stub functions that do nothing except
+	pass calls through to the given sub device. This includes
+	close and drop!
+
+	The caller of this function can then override any functions it
+	wants to handle itself.
+*/
+fz_device *fz_new_passthrough_device_of_size(fz_context *ctx, fz_device *passthrough, int size);
+#define fz_new_derived_passthrough_device(CTX, PASSTHRU, TYPE) \
+	((TYPE *)Memento_label(fz_new_passthrough_device_of_size(ctx,PASSTHRU,sizeof(TYPE)),#TYPE))
 
 /**
 	Signal the end of input, and flush any buffered output.
@@ -374,6 +448,8 @@ enum
 	/* Hints */
 	FZ_DONT_INTERPOLATE_IMAGES = 1,
 	FZ_NO_CACHE = 2,
+	FZ_DONT_DECODE_IMAGES = 4,
+	FZ_NO_TILING = 8
 };
 
 /**
@@ -487,6 +563,48 @@ enum
 };
 
 /**
+	Options for the culling device.
+
+	cull_gylph is called when the cull device needs a decision
+	about whether a given glyph should be culled or not. Return 0
+	to keep, 1 to cull, all other values reserved.
+
+	drop is called when the culling device is closed.
+*/
+typedef struct
+{
+	void *opaque;
+
+	int (*cull_glyph)(fz_context *ctx, void *opaque, fz_rect rect);
+	int (*cull_fill_path)(fz_context *ctx, void *opaque, const fz_path *path, int even_odd, fz_matrix ctm, fz_colorspace *cs, const float *color, float alpha);
+	int (*cull_stroke_path)(fz_context *ctx, void *opaque, const fz_path *path, const fz_stroke_state *state, fz_matrix ctm, fz_colorspace *cs, const float *color, float alpha);
+
+	void (*drop)(fz_context *ctx, void *opaque);
+} fz_culling_options;
+
+/**
+	Create an 'cull' device.
+
+	This device passes through all calls to the 'passthrough' device, except
+	for text operations that may be culled.
+
+	The decision as to whether to cull a glyph or not is made by calling the
+	'cull_glyph' function in the options structure with the rectangle that
+	would be affected. If the function returns 0, the glyph is passed through.
+	if the function returns 1, the glyph is dropped. All other values reserved.
+*/
+fz_device *fz_new_culling_device(fz_context *ctx, fz_device *passthrough, const fz_culling_options *opts);
+
+/**
+	Create an culling device that will drop any glyphs that significantly
+	overlap any of the given list of rects.
+
+	The rect list is copied into the device, so does not need to exist
+	beyond this call.
+*/
+fz_device *fz_new_culling_device_with_rects(fz_context *ctx, fz_device *passthrough, int n, const fz_rect *rects);
+
+/**
 	Create a device to draw on a pixmap.
 
 	dest: Target pixmap for the draw device. See fz_new_pixmap*
@@ -576,9 +694,23 @@ typedef struct
 FZ_DATA extern const char *fz_draw_options_usage;
 
 /**
-	Parse draw device options from a comma separated key-value string.
+	Initialise a draw_options struct to sensible values.
 */
-fz_draw_options *fz_parse_draw_options(fz_context *ctx, fz_draw_options *options, const char *string);
+void fz_init_draw_options(fz_context *ctx, fz_draw_options *draw_options);
+
+/**
+	Parse draw device options from a comma separated key-value string.
+
+	This initialises the draw_options struct first.
+*/
+fz_draw_options *fz_parse_draw_options(fz_context *ctx, fz_draw_options *draw_options, const char *string);
+
+/**
+	Parse draw device options from an fz_options structure.
+
+	This assumes that the draw_options struct has been initialised already.
+*/
+void fz_apply_draw_options(fz_context *ctx, fz_draw_options *draw_options, fz_options *options);
 
 /**
 	Create a new pixmap and draw device, using the specified options.

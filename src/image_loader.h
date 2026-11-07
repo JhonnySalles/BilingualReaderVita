@@ -23,6 +23,9 @@ bool getImageDimensionsFromFile(const std::string& filePath, int& outW, int& out
 // Redimensiona uma imagem do disco e salva diretamente como arquivo compacto (JPEG/PNG)
 bool saveResizedThumbnail(const std::string& imagePath, const std::string& outThumbnailPath, int maxW = 120, int maxH = 170);
 
+// Redimensiona uma imagem da memória e salva diretamente como arquivo compacto (JPEG)
+bool saveResizedThumbnailFromMemory(const unsigned char* buffer, size_t size, const std::string& outThumbnailPath, int maxW = 120, int maxH = 170);
+
 // Gera a miniatura de capa para um livro/mangá (CBZ, CBR, CBT, EPUB, PDF, etc.)
 bool generateCoverThumbnail(const std::string& bookPath, const std::string& outThumbnailPath, int maxW = 120, int maxH = 170);
 

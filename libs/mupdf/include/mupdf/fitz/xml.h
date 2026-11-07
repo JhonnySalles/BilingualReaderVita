@@ -1,4 +1,4 @@
-// Copyright (C) 2004-2022 Artifex Software, Inc.
+// Copyright (C) 2004-2024 Artifex Software, Inc.
 //
 // This file is part of MuPDF.
 //
@@ -57,7 +57,7 @@ fz_xml *fz_parse_xml_stream(fz_context *ctx, fz_stream *stream, int preserve_whi
 
 	preserve_white: whether to keep or delete all-whitespace nodes.
 */
-fz_xml *fz_parse_xml_archive_entry(fz_context *ctx, fz_archive *arch, const char *filename, int preserve_white);
+fz_xml *fz_parse_xml_archive_entry(fz_context *ctx, fz_archive *dir, const char *filename, int preserve_white);
 
 /**
 	Try and parse the contents of an archive entry into a tree of xml nodes.
@@ -67,7 +67,7 @@ fz_xml *fz_parse_xml_archive_entry(fz_context *ctx, fz_archive *arch, const char
 	Will return NULL if the archive entry can't be found. Otherwise behaves
 	the same as fz_parse_xml_archive_entry. May throw exceptions.
 */
-fz_xml *fz_try_parse_xml_archive_entry(fz_context *ctx, fz_archive *arch, const char *filename, int preserve_white);
+fz_xml *fz_try_parse_xml_archive_entry(fz_context *ctx, fz_archive *dir, const char *filename, int preserve_white);
 
 /**
 	Parse the contents of a buffer into a tree of XML nodes,
@@ -161,7 +161,13 @@ void fz_xml_add_att(fz_context *ctx, fz_pool *pool, fz_xml *node, const char *ke
 char *fz_xml_text(fz_xml *item);
 
 /**
-	Pretty-print an XML tree to stdout.
+	Pretty-print an XML tree to given output.
+*/
+void fz_output_xml(fz_context *ctx, fz_output *out, fz_xml *item, int level);
+
+/**
+	Pretty-print an XML tree to stdout. (Deprecated, use
+	fz_output_xml in preference).
 */
 void fz_debug_xml(fz_xml *item, int level);
 
@@ -249,6 +255,11 @@ fz_xml *fz_xml_find_next_dfs(fz_xml *item, const char *tag, const char *att, con
 	the top of the tree, or the declared 'top' item.
 */
 fz_xml *fz_xml_find_next_dfs_top(fz_xml *item, const char *tag, const char *att, const char *match, fz_xml *top);
+
+/**
+	Extract and concatenate all plain text data from XML tree into a new string.
+*/
+char *fz_new_text_from_xml(fz_context *ctx, fz_xml *root);
 
 /**
 	DOM-like functions for html in xml.
@@ -387,5 +398,43 @@ const char *fz_dom_attribute(fz_context *ctx, fz_xml *elt, const char *att);
 	value will be a borrowed pointer to the value.
 */
 const char *fz_dom_get_attribute(fz_context *ctx, fz_xml *elt, int i, const char **att);
+
+/**
+	Make new xml dom root element.
+*/
+fz_xml *fz_new_dom(fz_context *ctx, const char *tag);
+
+/**
+	Create a new dom node.
+
+	This will NOT be linked in yet.
+*/
+fz_xml *fz_new_dom_node(fz_context *ctx, fz_xml *dom, const char *tag);
+
+/**
+	Create a new dom text node.
+
+	This will NOT be linked in yet.
+*/
+fz_xml *fz_new_dom_text_node(fz_context *ctx, fz_xml *dom, const char *text);
+
+/**
+	Write our xml structure out to an xml stream.
+
+	Properly formatted XML is only allowed to have a single top-level node
+	under which everything must sit. Our structures allow for multiple
+	top level nodes. If required, we will output an extra 'ROOT' node
+	at the top so that the xml is well-formed.
+
+	If 'indented' is non-zero then additional whitespace will be added to
+	make the XML easier to read in a text editor. It will NOT be properly
+	compliant.
+*/
+void fz_write_xml(fz_context *ctx, fz_xml *root, fz_output *out, int indented);
+
+/**
+	As for fz_write_xml, but direct to a file.
+*/
+void fz_save_xml(fz_context *ctx, fz_xml *root, const char *path, int indented);
 
 #endif

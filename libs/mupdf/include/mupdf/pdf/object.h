@@ -1,4 +1,4 @@
-// Copyright (C) 2004-2021 Artifex Software, Inc.
+// Copyright (C) 2004-2025 Artifex Software, Inc.
 //
 // This file is part of MuPDF.
 //
@@ -29,6 +29,8 @@ typedef struct pdf_document pdf_document;
 typedef struct pdf_crypt pdf_crypt;
 typedef struct pdf_journal pdf_journal;
 
+typedef struct pdf_resource_stack pdf_resource_stack;
+
 /* Defined in PDF 1.7 according to Acrobat limit. */
 #define PDF_MAX_OBJECT_NUMBER 8388607
 #define PDF_MAX_GEN_NUMBER 65535
@@ -51,9 +53,10 @@ pdf_obj *pdf_new_string(fz_context *ctx, const char *str, size_t len);
 	In theory, we could also use PDFDocEncoding.
 */
 pdf_obj *pdf_new_text_string(fz_context *ctx, const char *s);
-pdf_obj *pdf_new_indirect(fz_context *ctx, pdf_document *doc, int num, int gen);
+pdf_obj *pdf_new_indirect(fz_context *ctx, pdf_document *doc, int64_t num, int gen);
 pdf_obj *pdf_new_array(fz_context *ctx, pdf_document *doc, int initialcap);
 pdf_obj *pdf_new_dict(fz_context *ctx, pdf_document *doc, int initialcap);
+pdf_obj *pdf_new_point(fz_context *ctx, pdf_document *doc, fz_point point);
 pdf_obj *pdf_new_rect(fz_context *ctx, pdf_document *doc, fz_rect rect);
 pdf_obj *pdf_new_matrix(fz_context *ctx, pdf_document *doc, fz_matrix mtx);
 pdf_obj *pdf_new_date(fz_context *ctx, pdf_document *doc, int64_t time);
@@ -64,6 +67,7 @@ pdf_obj *pdf_deep_copy_obj(fz_context *ctx, pdf_obj *obj);
 pdf_obj *pdf_keep_obj(fz_context *ctx, pdf_obj *obj);
 void pdf_drop_obj(fz_context *ctx, pdf_obj *obj);
 pdf_obj *pdf_drop_singleton_obj(fz_context *ctx, pdf_obj *obj);
+int pdf_obj_is_singleton(fz_context *ctx, pdf_obj *obj);
 
 int pdf_is_null(fz_context *ctx, pdf_obj *obj);
 int pdf_is_bool(fz_context *ctx, pdf_obj *obj);
@@ -75,6 +79,12 @@ int pdf_is_string(fz_context *ctx, pdf_obj *obj);
 int pdf_is_array(fz_context *ctx, pdf_obj *obj);
 int pdf_is_dict(fz_context *ctx, pdf_obj *obj);
 int pdf_is_indirect(fz_context *ctx, pdf_obj *obj);
+
+/*
+	If obj is an indirect object, return it. If not,
+	throw an error.
+*/
+pdf_obj *pdf_ensure_indirect(fz_context *ctx, pdf_obj *obj);
 
 /*
 	Check if an object is a stream or not.
@@ -104,12 +114,19 @@ struct pdf_cycle_list {
 	pdf_cycle_list *up;
 	int num;
 };
+/*
+	Check for a cycle (or stack overflow) in PDF structures.
+
+	Returns 1 if a cycle found.
+	Returns -1 if we pass some arbitrary depth (currently 256).
+	Otherwise returns 0.
+*/
 int pdf_cycle(fz_context *ctx, pdf_cycle_list *here, pdf_cycle_list *prev, pdf_obj *obj);
 
 typedef struct
 {
 	int len;
-	unsigned char bits[1];
+	unsigned char bits[FZ_FLEXIBLE_ARRAY];
 } pdf_mark_bits;
 
 pdf_mark_bits *pdf_new_mark_bits(fz_context *ctx, pdf_document *doc);
@@ -127,6 +144,7 @@ typedef struct
 
 int pdf_mark_list_push(fz_context *ctx, pdf_mark_list *list, pdf_obj *obj);
 void pdf_mark_list_pop(fz_context *ctx, pdf_mark_list *list);
+int pdf_mark_list_check(fz_context *ctx, pdf_mark_list *list, pdf_obj *obj);
 void pdf_mark_list_init(fz_context *ctx, pdf_mark_list *list);
 void pdf_mark_list_free(fz_context *ctx, pdf_mark_list *list);
 
@@ -148,6 +166,10 @@ char *pdf_to_str_buf(fz_context *ctx, pdf_obj *obj);
 size_t pdf_to_str_len(fz_context *ctx, pdf_obj *obj);
 int pdf_to_num(fz_context *ctx, pdf_obj *obj);
 int pdf_to_gen(fz_context *ctx, pdf_obj *obj);
+
+int pdf_to_bool_default(fz_context *ctx, pdf_obj *obj, int def);
+int pdf_to_int_default(fz_context *ctx, pdf_obj *obj, int def);
+float pdf_to_real_default(fz_context *ctx, pdf_obj *obj, float def);
 
 int pdf_array_len(fz_context *ctx, pdf_obj *array);
 pdf_obj *pdf_array_get(fz_context *ctx, pdf_obj *array, int i);
@@ -193,6 +215,8 @@ void pdf_dict_put_real(fz_context *ctx, pdf_obj *dict, pdf_obj *key, double x);
 void pdf_dict_put_name(fz_context *ctx, pdf_obj *dict, pdf_obj *key, const char *x);
 void pdf_dict_put_string(fz_context *ctx, pdf_obj *dict, pdf_obj *key, const char *x, size_t n);
 void pdf_dict_put_text_string(fz_context *ctx, pdf_obj *dict, pdf_obj *key, const char *x);
+void pdf_dict_put_indirect(fz_context *ctx, pdf_obj *dict, pdf_obj *key, int num);
+void pdf_dict_put_point(fz_context *ctx, pdf_obj *dict, pdf_obj *key, fz_point x);
 void pdf_dict_put_rect(fz_context *ctx, pdf_obj *dict, pdf_obj *key, fz_rect x);
 void pdf_dict_put_matrix(fz_context *ctx, pdf_obj *dict, pdf_obj *key, fz_matrix x);
 void pdf_dict_put_date(fz_context *ctx, pdf_obj *dict, pdf_obj *key, int64_t time);
@@ -207,9 +231,26 @@ float pdf_dict_get_real(fz_context *ctx, pdf_obj *dict, pdf_obj *key);
 const char *pdf_dict_get_name(fz_context *ctx, pdf_obj *dict, pdf_obj *key);
 const char *pdf_dict_get_string(fz_context *ctx, pdf_obj *dict, pdf_obj *key, size_t *sizep);
 const char *pdf_dict_get_text_string(fz_context *ctx, pdf_obj *dict, pdf_obj *key);
+const char *pdf_dict_get_text_string_opt(fz_context *ctx, pdf_obj *dict, pdf_obj *key);
+fz_point pdf_dict_get_point(fz_context *ctx, pdf_obj *dict, pdf_obj *key);
 fz_rect pdf_dict_get_rect(fz_context *ctx, pdf_obj *dict, pdf_obj *key);
 fz_matrix pdf_dict_get_matrix(fz_context *ctx, pdf_obj *dict, pdf_obj *key);
 int64_t pdf_dict_get_date(fz_context *ctx, pdf_obj *dict, pdf_obj *key);
+
+int pdf_dict_get_bool_default(fz_context *ctx, pdf_obj *dict, pdf_obj *key, int def);
+int pdf_dict_get_int_default(fz_context *ctx, pdf_obj *dict, pdf_obj *key, int def);
+float pdf_dict_get_real_default(fz_context *ctx, pdf_obj *dict, pdf_obj *key, float def);
+
+int pdf_dict_get_inheritable_bool(fz_context *ctx, pdf_obj *dict, pdf_obj *key);
+int pdf_dict_get_inheritable_int(fz_context *ctx, pdf_obj *dict, pdf_obj *key);
+int64_t pdf_dict_get_inheritable_int64(fz_context *ctx, pdf_obj *dict, pdf_obj *key);
+float pdf_dict_get_inheritable_real(fz_context *ctx, pdf_obj *dict, pdf_obj *key);
+const char *pdf_dict_get_inheritable_name(fz_context *ctx, pdf_obj *dict, pdf_obj *key);
+const char *pdf_dict_get_inheritable_string(fz_context *ctx, pdf_obj *dict, pdf_obj *key, size_t *sizep);
+const char *pdf_dict_get_inheritable_text_string(fz_context *ctx, pdf_obj *dict, pdf_obj *key);
+fz_rect pdf_dict_get_inheritable_rect(fz_context *ctx, pdf_obj *dict, pdf_obj *key);
+fz_matrix pdf_dict_get_inheritable_matrix(fz_context *ctx, pdf_obj *dict, pdf_obj *key);
+int64_t pdf_dict_get_inheritable_date(fz_context *ctx, pdf_obj *dict, pdf_obj *key);
 
 void pdf_array_push_bool(fz_context *ctx, pdf_obj *array, int x);
 void pdf_array_push_int(fz_context *ctx, pdf_obj *array, int64_t x);
@@ -219,6 +260,15 @@ void pdf_array_push_string(fz_context *ctx, pdf_obj *array, const char *x, size_
 void pdf_array_push_text_string(fz_context *ctx, pdf_obj *array, const char *x);
 pdf_obj *pdf_array_push_array(fz_context *ctx, pdf_obj *array, int initial);
 pdf_obj *pdf_array_push_dict(fz_context *ctx, pdf_obj *array, int initial);
+
+void pdf_array_put_bool(fz_context *ctx, pdf_obj *array, int i, int x);
+void pdf_array_put_int(fz_context *ctx, pdf_obj *array, int i, int64_t x);
+void pdf_array_put_real(fz_context *ctx, pdf_obj *array, int i, double x);
+void pdf_array_put_name(fz_context *ctx, pdf_obj *array, int i, const char *x);
+void pdf_array_put_string(fz_context *ctx, pdf_obj *array, int i, const char *x, size_t n);
+void pdf_array_put_text_string(fz_context *ctx, pdf_obj *array, int i, const char *x);
+pdf_obj *pdf_array_put_array(fz_context *ctx, pdf_obj *array, int i, int initial);
+pdf_obj *pdf_array_put_dict(fz_context *ctx, pdf_obj *array, int i, int initial);
 
 int pdf_array_get_bool(fz_context *ctx, pdf_obj *array, int index);
 int pdf_array_get_int(fz_context *ctx, pdf_obj *array, int index);
@@ -237,7 +287,7 @@ int pdf_obj_parent_num(fz_context *ctx, pdf_obj *obj);
 
 char *pdf_sprint_obj(fz_context *ctx, char *buf, size_t cap, size_t *len, pdf_obj *obj, int tight, int ascii);
 void pdf_print_obj(fz_context *ctx, fz_output *out, pdf_obj *obj, int tight, int ascii);
-void pdf_print_encrypted_obj(fz_context *ctx, fz_output *out, pdf_obj *obj, int tight, int ascii, pdf_crypt *crypt, int num, int gen);
+void pdf_print_encrypted_obj(fz_context *ctx, fz_output *out, pdf_obj *obj, int tight, int ascii, pdf_crypt *crypt, int num, int gen, int *sep);
 
 void pdf_debug_obj(fz_context *ctx, pdf_obj *obj);
 void pdf_debug_ref(fz_context *ctx, pdf_obj *obj);
@@ -271,6 +321,7 @@ char *pdf_new_utf8_from_pdf_stream_obj(fz_context *ctx, pdf_obj *src);
 char *pdf_load_stream_or_string_as_utf8(fz_context *ctx, pdf_obj *src);
 
 fz_quad pdf_to_quad(fz_context *ctx, pdf_obj *array, int offset);
+fz_point pdf_to_point(fz_context *ctx, pdf_obj *array, int offset);
 fz_rect pdf_to_rect(fz_context *ctx, pdf_obj *array);
 fz_matrix pdf_to_matrix(fz_context *ctx, pdf_obj *array);
 int64_t pdf_to_date(fz_context *ctx, pdf_obj *time);
@@ -402,5 +453,7 @@ void pdf_add_journal_fragment(fz_context *ctx, pdf_document *doc, int parent, pd
 
 char *pdf_format_date(fz_context *ctx, int64_t time, char *s, size_t n);
 int64_t pdf_parse_date(fz_context *ctx, const char *s);
+
+int pdf_is_image_stream(fz_context *ctx, pdf_obj *obj);
 
 #endif

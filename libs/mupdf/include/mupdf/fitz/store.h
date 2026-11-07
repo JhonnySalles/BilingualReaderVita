@@ -27,6 +27,7 @@
 #include "mupdf/fitz/context.h"
 #include "mupdf/fitz/output.h"
 #include "mupdf/fitz/log.h"
+#include "mupdf/fitz/types.h"
 
 /**
 	Resource store
@@ -60,6 +61,14 @@ typedef struct fz_storable fz_storable;
 typedef void (fz_store_drop_fn)(fz_context *, fz_storable *);
 
 /**
+	Function type for a function to check whether a storable
+	object can be dropped at the moment.
+
+	Return 0 for 'cannot be dropped', 1 otherwise.
+*/
+typedef int (fz_store_droppable_fn)(fz_context *, fz_storable *);
+
+/**
 	Any storable object should include an fz_storable structure
 	at the start (by convention at least) of their structure.
 	(Unless it starts with an fz_key_storable, see below).
@@ -67,6 +76,7 @@ typedef void (fz_store_drop_fn)(fz_context *, fz_storable *);
 struct fz_storable {
 	int refs;
 	fz_store_drop_fn *drop;
+	fz_store_droppable_fn *droppable;
 };
 
 /**
@@ -81,11 +91,16 @@ typedef struct
 } fz_key_storable;
 
 /**
-	Macro to initialise a storable object.
+	Macros to initialise a storable object.
 */
 #define FZ_INIT_STORABLE(S_,RC,DROP) \
 	do { fz_storable *S = &(S_)->storable; S->refs = (RC); \
-	S->drop = (DROP); \
+	S->drop = (DROP); S->droppable = NULL; \
+	} while (0)
+
+#define FZ_INIT_AWKWARD_STORABLE(S_,RC,DROP,DROPPABLE) \
+	do { fz_storable *S = &(S_)->storable; S->refs = (RC); \
+	S->drop = (DROP); S->droppable = (DROPPABLE); \
 	} while (0)
 
 /**
@@ -223,7 +238,8 @@ typedef struct
 			char has_group_alpha;
 			float m[4];
 			void *ptr;
-		} im; /* 28 or 32 bytes */
+			int doc_id;
+		} im; /* 32 or 36 bytes */
 		struct
 		{
 			unsigned char src_md5[16];
@@ -238,7 +254,8 @@ typedef struct
 			unsigned int bgr:1;
 		} link; /* 36 bytes */
 	} u;
-} fz_store_hash; /* 40 or 44 bytes */
+	/* 0 or 4 bytes padding */
+} fz_store_hash; /* 40 or 48 bytes */
 
 /**
 	Every type of object to be placed into the store defines an
@@ -389,6 +406,12 @@ typedef int (fz_store_filter_fn)(fz_context *ctx, void *arg, void *key);
 	If the function returns 1 for an element, drop the element.
 */
 void fz_filter_store(fz_context *ctx, fz_store_filter_fn *fn, void *arg, const fz_store_type *type);
+
+/**
+	Filter the store and throw away any stored tiles drawn for a
+	given document.
+*/
+void fz_drop_drawn_tiles_for_document(fz_context *ctx, fz_document *doc);
 
 /**
 	Output debugging information for the current state of the store

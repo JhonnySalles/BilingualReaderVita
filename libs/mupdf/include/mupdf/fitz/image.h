@@ -1,4 +1,4 @@
-// Copyright (C) 2004-2023 Artifex Software, Inc.
+// Copyright (C) 2004-2025 Artifex Software, Inc.
 //
 // This file is part of MuPDF.
 //
@@ -65,6 +65,12 @@ typedef struct fz_pixmap_image fz_pixmap_image;
 	Returns a non NULL kept pixmap pointer. May throw exceptions.
 */
 fz_pixmap *fz_get_pixmap_from_image(fz_context *ctx, fz_image *image, const fz_irect *subarea, fz_matrix *ctm, int *w, int *h);
+
+/**
+	Like fz_get_pixmap_from_image but convert to an alpha only mask using
+	luminance if the image is grayscale or RGB.
+*/
+fz_pixmap *fz_get_pixmap_mask_from_image(fz_context *ctx, fz_image *image, const fz_irect *subarea, fz_matrix *ctm, int *dw, int *dh, int in_smask);
 
 /**
 	Calls fz_get_pixmap_from_image() with ctm, subarea, w and h all set to NULL.
@@ -138,6 +144,16 @@ typedef void (fz_drop_image_fn)(fz_context *ctx, fz_image *image);
 typedef fz_pixmap *(fz_image_get_pixmap_fn)(fz_context *ctx, fz_image *im, fz_irect *subarea, int w, int h, int *l2factor);
 
 /**
+	Function type to get a checksum for an image.
+*/
+typedef void (fz_image_get_digest_fn)(fz_context *ctx, fz_image *im, unsigned char digest[16]);
+
+/**
+	Compute a checksum for the image.
+*/
+void fz_image_digest(fz_context *ctx, fz_image *img, unsigned char digest[16]);
+
+/**
 	Function type to get the given storage
 	size for an image.
 
@@ -178,10 +194,12 @@ typedef size_t (fz_image_get_size_fn)(fz_context *, fz_image *);
 	size: The size of the required allocated structure (the size of
 	the derived structure).
 
-	get: The function to be called to obtain a decoded pixmap.
+	get_pixmap: The function to be called to obtain a decoded pixmap.
 
 	get_size: The function to be called to return the storage size
 	used by this image.
+
+	get_digest: The function to be called to compute a checksum from this image.
 
 	drop: The function to be called to dispose of this image once
 	the last reference is dropped.
@@ -199,16 +217,17 @@ fz_image *fz_new_image_of_size(fz_context *ctx,
 		int yres,
 		int interpolate,
 		int imagemask,
-		float *decode,
-		int *colorkey,
+		const float *decode,
+		const int *colorkey,
 		fz_image *mask,
 		size_t size,
 		fz_image_get_pixmap_fn *get_pixmap,
 		fz_image_get_size_fn *get_size,
+		fz_image_get_digest_fn *get_digest,
 		fz_drop_image_fn *drop);
 
-#define fz_new_derived_image(CTX,W,H,B,CS,X,Y,I,IM,D,C,M,T,G,S,Z) \
-	((T*)Memento_label(fz_new_image_of_size(CTX,W,H,B,CS,X,Y,I,IM,D,C,M,sizeof(T),G,S,Z),#T))
+#define fz_new_derived_image(CTX,W,H,B,CS,X,Y,I,IM,D,C,M,T,G,S,MD5,Z) \
+	((T*)Memento_label(fz_new_image_of_size(CTX,W,H,B,CS,X,Y,I,IM,D,C,M,sizeof(T),G,S,MD5,Z),#T))
 
 /**
 	Create an image based on
@@ -243,7 +262,7 @@ fz_image *fz_new_image_of_size(fz_context *ctx,
 	A new reference is taken to this image. Supplying a masked
 	image as a mask to another image is illegal!
 */
-fz_image *fz_new_image_from_compressed_buffer(fz_context *ctx, int w, int h, int bpc, fz_colorspace *colorspace, int xres, int yres, int interpolate, int imagemask, float *decode, int *colorkey, fz_compressed_buffer *buffer, fz_image *mask);
+fz_image *fz_new_image_from_compressed_buffer(fz_context *ctx, int w, int h, int bpc, fz_colorspace *colorspace, int xres, int yres, int interpolate, int imagemask, const float *decode, const int *colorkey, fz_compressed_buffer *buffer, fz_image *mask);
 
 /**
 	Create an image from the given
@@ -264,6 +283,7 @@ fz_image *fz_new_image_from_pixmap(fz_context *ctx, fz_pixmap *pixmap, fz_image 
 	of the data.
 */
 fz_image *fz_new_image_from_buffer(fz_context *ctx, fz_buffer *buffer);
+fz_image *fz_new_jpx_image_from_buffer(fz_context *ctx, fz_buffer *buffer, fz_colorspace *cs);
 
 /**
 	Create a new image from the contents
@@ -316,6 +336,14 @@ fz_pixmap *fz_convert_separation_pixmap_to_base(fz_context *ctx, const fz_pixmap
 size_t fz_image_size(fz_context *ctx, fz_image *im);
 
 /**
+	Return the type of a compressed image.
+
+	Any non-compressed image will have the type returned as UNKNOWN.
+*/
+int fz_compressed_image_type(fz_context *ctx, fz_image *image);
+
+
+/**
 	Structure is public to allow other structures to
 	be derived from it. Do not access members directly.
 */
@@ -331,6 +359,8 @@ struct fz_image
 	unsigned int use_decode:1;
 	unsigned int decoded:1;
 	unsigned int scalable:1;
+	unsigned int intent:2;
+	unsigned int has_intent:1;
 	uint8_t orientation;
 	fz_image *mask;
 	int xres; /* As given in the image, not necessarily as rendered */
@@ -338,6 +368,7 @@ struct fz_image
 	fz_colorspace *colorspace;
 	fz_drop_image_fn *drop_image;
 	fz_image_get_pixmap_fn *get_pixmap;
+	fz_image_get_digest_fn *get_digest;
 	fz_image_get_size_fn *get_size;
 	int colorkey[FZ_MAX_COLORS * 2];
 	float decode[FZ_MAX_COLORS * 2];
@@ -377,6 +408,12 @@ void fz_image_resolution(fz_image *image, int *xres, int *yres);
 */
 uint8_t fz_image_orientation(fz_context *ctx, fz_image *image);
 
+/*
+	Return true if the image source is a lossy format such as JPEG,
+	JPEG2000, or JPEG-XR.
+*/
+int fz_is_lossy_image(fz_context *ctx, fz_image *image);
+
 fz_matrix
 fz_image_orientation_matrix(fz_context *ctx, fz_image *image);
 
@@ -412,6 +449,13 @@ void fz_set_pixmap_image_tile(fz_context *ctx, fz_pixmap_image *cimg, fz_pixmap 
 	Exposed for PDF.
 */
 fz_pixmap *fz_load_jpx(fz_context *ctx, const unsigned char *data, size_t size, fz_colorspace *cs);
+
+/**
+	Exposed because compression and decompression need to share this.
+*/
+void fz_opj_lock(fz_context *ctx);
+void fz_opj_unlock(fz_context *ctx);
+
 
 /**
 	Exposed for CBZ.

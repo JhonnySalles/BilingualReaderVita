@@ -62,6 +62,19 @@ set(SOURCES
   src/reader_txt.cpp
   src/reader_cbz.cpp
   src/reader_epub.cpp
+  src/extractors/image_size_utils.cpp
+  src/extractors/spine_segmenter.cpp
+  src/extractors/zip_writer.cpp
+  src/extractors/epub_packager.cpp
+  src/extractors/archive_helper.cpp
+  src/extractors/epub_extractor.cpp
+  src/extractors/cbz_extractor.cpp
+  src/extractors/docx_extractor.cpp
+  src/extractors/fb2_extractor.cpp
+  src/extractors/palmdoc_decompressor.cpp
+  src/extractors/mobi_extractor.cpp
+  src/extractors/archive_book_extractor.cpp
+  src/extractors/book_extractor_manager.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})

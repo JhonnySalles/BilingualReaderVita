@@ -19,6 +19,8 @@
 #include "reader_epub.h"
 #include "managers/pages_link_manager.h"
 #include "managers/cover_manager.h"
+#include "cache_manager.h"
+#include "extractors/book_extractor_manager.h"
 
 // Matriz ortográfica interna do vita2d (sem setter público).
 extern "C" float _vita2d_ortho_matrix[4 * 4];
@@ -317,8 +319,12 @@ int main(int argc, char* argv[]) {
                     readerCbz.setPageTransition(appConfig.pageTransition);
                     currentState = AppState::READ_CBZ;
                 }
-            } else if (selected.type == FileType::EPUB) {
-                if (readerEpub.loadFile(selected.fullPath, pgf)) {
+            } else if (FileBrowser::isBookType(selected.type)) {
+                std::string pathToOpen = Extractor::BookExtractorManager::instance().prepareForReading(
+                    selected.fullPath,
+                    CacheManager::getInstance().getCacheBasePath()
+                );
+                if (readerEpub.loadFile(pathToOpen, pgf)) {
                     readerEpub.setRotated(readerRotated);
                     readerEpub.setScrollMode(appConfig.readerScrollMode);
                     readerEpub.setPageTransition(appConfig.pageTransition);
@@ -328,8 +334,42 @@ int main(int argc, char* argv[]) {
         }
     };
 
+    auto saveCurrentReaderProgress = [&]() {
+        if (selectedIndex >= 0 && selectedIndex < static_cast<int>(visibleItems.size())) {
+            auto& selected = visibleItems[selectedIndex];
+            int curP = 0;
+            int totP = 0;
+            if (currentState == AppState::READ_TXT) {
+                curP = readerTxt.getCurrentPage();
+                totP = readerTxt.getTotalPages();
+            } else if (currentState == AppState::READ_CBZ) {
+                curP = readerCbz.getCurrentPage();
+                totP = readerCbz.getTotalPages();
+            } else if (currentState == AppState::READ_EPUB) {
+                curP = readerEpub.getCurrentPage();
+                totP = readerEpub.getTotalPages();
+            }
+            if (totP > 0) {
+                selected.currentPage = curP;
+                selected.totalPages = totP;
+                selected.progressPercent = (static_cast<float>(curP + 1) / static_cast<float>(totP)) * 100.0f;
+                if (selected.progressPercent > 100.0f) selected.progressPercent = 100.0f;
+                for (auto& orig : allItems) {
+                    if (orig.filename == selected.filename) {
+                        orig.currentPage = selected.currentPage;
+                        orig.totalPages = selected.totalPages;
+                        orig.progressPercent = selected.progressPercent;
+                        break;
+                    }
+                }
+                FileBrowser::saveMetadata(allItems);
+            }
+        }
+    };
+
     auto openPrevBook = [&]() {
         if (visibleItems.size() <= 1) return;
+        saveCurrentReaderProgress();
         int nextIdx = selectedIndex - 1;
         if (nextIdx < 0) nextIdx = static_cast<int>(visibleItems.size()) - 1;
         if (nextIdx != selectedIndex) {
@@ -339,6 +379,7 @@ int main(int argc, char* argv[]) {
 
     auto openNextBook = [&]() {
         if (visibleItems.size() <= 1) return;
+        saveCurrentReaderProgress();
         int nextIdx = selectedIndex + 1;
         if (nextIdx >= static_cast<int>(visibleItems.size())) nextIdx = 0;
         if (nextIdx != selectedIndex) {
@@ -1644,6 +1685,7 @@ int main(int argc, char* argv[]) {
                 settingsSelectedIndex = 0;
             }
             if (pressed & SCE_CTRL_CIRCLE) {
+                saveCurrentReaderProgress();
                 readerTxt.close();
                 currentState = AppState::MENU;
             }
@@ -1685,6 +1727,7 @@ int main(int argc, char* argv[]) {
                 settingsSelectedIndex = 0;
             }
             if (pressed & SCE_CTRL_CIRCLE) {
+                saveCurrentReaderProgress();
                 readerCbz.close();
                 currentState = AppState::MENU;
             }
@@ -1729,6 +1772,7 @@ int main(int argc, char* argv[]) {
                 settingsSelectedIndex = 0;
             }
             if (pressed & SCE_CTRL_CIRCLE) {
+                saveCurrentReaderProgress();
                 readerEpub.close();
                 currentState = AppState::MENU;
             }

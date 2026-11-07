@@ -1,4 +1,4 @@
-// Copyright (C) 2004-2021 Artifex Software, Inc.
+// Copyright (C) 2004-2026 Artifex Software, Inc.
 //
 // This file is part of MuPDF.
 //
@@ -56,6 +56,11 @@ typedef struct fz_stream fz_stream;
 fz_stream *fz_open_file(fz_context *ctx, const char *filename);
 
 /**
+	Do the same as fz_open_file, but delete the file upon close.
+*/
+fz_stream *fz_open_file_autodelete(fz_context *ctx, const char *filename);
+
+/**
 	Open the named file and wrap it in a stream.
 
 	Does the same as fz_open_file, but in the event the file
@@ -75,6 +80,14 @@ fz_stream *fz_try_open_file(fz_context *ctx, const char *name);
 */
 fz_stream *fz_open_file_w(fz_context *ctx, const wchar_t *filename);
 #endif /* _WIN32 */
+
+/**
+	Return the filename (UTF-8 encoded) from which a stream was opened.
+
+	Returns NULL if the filename is not available (or the stream was
+	opened from a source other than a file).
+*/
+const char *fz_stream_filename(fz_context *ctx, fz_stream *stm);
 
 /**
 	Open a block of memory as a stream.
@@ -145,6 +158,10 @@ int64_t fz_tell(fz_context *ctx, fz_stream *stm);
 	offset: The offset to seek to.
 
 	whence: From where the offset is measured (see fseek).
+	SEEK_SET - start of stream.
+	SEEK_CUR - current position.
+	SEEK_END - end of stream.
+
 */
 void fz_seek(fz_context *ctx, fz_stream *stm, int64_t offset, int whence);
 
@@ -196,6 +213,12 @@ fz_buffer *fz_read_file(fz_context *ctx, const char *filename);
 	behaves exactly as fz_read_file.
 */
 fz_buffer *fz_try_read_file(fz_context *ctx, const char *filename);
+
+/**
+	Read all the contents of a file into a string.
+	File should be UTF-8 encoded plain text.
+*/
+char *fz_read_text_file(fz_context *ctx, const char *filename);
 
 /**
 	fz_read_[u]int(16|24|32|64)(_le)?
@@ -381,19 +404,21 @@ void fz_skip_space(fz_context *ctx, fz_stream *stm);
 */
 static inline size_t fz_available(fz_context *ctx, fz_stream *stm, size_t max)
 {
-	size_t len = stm->wp - stm->rp;
+	size_t len;
 	int c = EOF;
 
+	if (stm == NULL || stm->eof)
+		return 0;
+	len = stm->wp - stm->rp;
 	if (len)
 		return len;
-	if (stm->eof)
-		return 0;
 
 	fz_try(ctx)
 		c = stm->next(ctx, stm, max);
 	fz_catch(ctx)
 	{
 		fz_rethrow_if(ctx, FZ_ERROR_TRYLATER);
+		fz_report_error(ctx);
 		fz_warn(ctx, "read error; treating as end of file");
 		stm->error = 1;
 		c = EOF;
@@ -428,6 +453,7 @@ static inline int fz_read_byte(fz_context *ctx, fz_stream *stm)
 	fz_catch(ctx)
 	{
 		fz_rethrow_if(ctx, FZ_ERROR_TRYLATER);
+		fz_report_error(ctx);
 		fz_warn(ctx, "read error; treating as end of file");
 		stm->error = 1;
 		c = EOF;
@@ -462,6 +488,7 @@ static inline int fz_peek_byte(fz_context *ctx, fz_stream *stm)
 	fz_catch(ctx)
 	{
 		fz_rethrow_if(ctx, FZ_ERROR_TRYLATER);
+		fz_report_error(ctx);
 		fz_warn(ctx, "read error; treating as end of file");
 		stm->error = 1;
 		c = EOF;
@@ -514,7 +541,7 @@ static inline int fz_is_eof(fz_context *ctx, fz_stream *stm)
 */
 static inline unsigned int fz_read_bits(fz_context *ctx, fz_stream *stm, int n)
 {
-	int x;
+	unsigned int x;
 
 	if (n <= stm->avail)
 	{

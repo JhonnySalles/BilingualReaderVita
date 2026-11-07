@@ -2,6 +2,7 @@
 #include "file_utils.h"
 #include "parses/parse_rar.h"
 #include "parses/parse_tar.h"
+#include "extractors/book_extractor_manager.h"
 #include <cstdio>
 #include <vector>
 #include <algorithm>
@@ -448,6 +449,75 @@ bool saveResizedThumbnail(const std::string& imagePath, const std::string& outTh
     return success;
 }
 
+bool saveResizedThumbnailFromMemory(const unsigned char* buffer, size_t size, const std::string& outThumbnailPath, int maxW, int maxH) {
+    if (!buffer || size == 0 || outThumbnailPath.empty()) return false;
+
+    fz_context* ctx = getFzContext();
+    if (!ctx) return false;
+
+    fz_buffer* fzbuf = nullptr;
+    fz_stream* stm = nullptr;
+    fz_document* doc = nullptr;
+    fz_page* page = nullptr;
+    fz_pixmap* pix = nullptr;
+    bool success = false;
+
+    fz_try(ctx) {
+        fzbuf = fz_new_buffer_from_copied_data(ctx, buffer, size);
+        stm = fz_open_buffer(ctx, fzbuf);
+        doc = fz_open_document_with_stream(ctx, ".jpg", stm);
+        if (doc && fz_count_pages(ctx, doc) > 0) {
+            page = fz_load_page(ctx, doc, 0);
+            if (page) {
+                fz_rect bounds = fz_bound_page(ctx, page);
+                float pageW = bounds.x1 - bounds.x0;
+                float pageH = bounds.y1 - bounds.y0;
+                if (pageW > 0.0f && pageH > 0.0f) {
+                    float scale = std::min((float)maxW / pageW, (float)maxH / pageH);
+                    if (scale > 1.0f) scale = 1.0f;
+                    if (scale < 0.01f) scale = 0.01f;
+
+                    fz_matrix ctm = fz_scale(scale, scale);
+                    fz_irect ibounds = fz_round_rect(fz_transform_rect(bounds, ctm));
+
+                    fz_colorspace* cs = fz_device_rgb(ctx);
+                    pix = fz_new_pixmap_with_bbox(ctx, cs, ibounds, NULL, 0);
+                    fz_clear_pixmap_with_value(ctx, pix, 0xFF);
+
+                    fz_device* dev = fz_new_draw_device(ctx, ctm, pix);
+                    fz_run_page(ctx, page, dev, fz_identity, NULL);
+                    fz_close_device(ctx, dev);
+                    fz_drop_device(ctx, dev);
+
+                    fz_save_pixmap_as_jpeg(ctx, pix, outThumbnailPath.c_str(), 80);
+                    success = true;
+                }
+                fz_drop_page(ctx, page);
+                page = nullptr;
+            }
+            fz_drop_document(ctx, doc);
+            doc = nullptr;
+        }
+        fz_drop_stream(ctx, stm);
+        stm = nullptr;
+        fz_drop_buffer(ctx, fzbuf);
+        fzbuf = nullptr;
+    }
+    fz_catch(ctx) {
+        if (page) fz_drop_page(ctx, page);
+        if (doc) fz_drop_document(ctx, doc);
+        if (stm) fz_drop_stream(ctx, stm);
+        if (fzbuf) fz_drop_buffer(ctx, fzbuf);
+        if (pix) fz_drop_pixmap(ctx, pix);
+        return false;
+    }
+
+    if (pix) {
+        fz_drop_pixmap(ctx, pix);
+    }
+    return success;
+}
+
 bool generateCoverThumbnail(const std::string& bookPath, const std::string& outThumbnailPath, int maxW, int maxH) {
     if (bookPath.empty() || outThumbnailPath.empty()) return false;
 
@@ -483,7 +553,17 @@ bool generateCoverThumbnail(const std::string& bookPath, const std::string& outT
         return false;
     }
 
-    // Para CBZ, ZIP, EPUB, PDF, XPS, FB2
+    // 1. Extração direta de capa binária via BookExtractorManager (EPUB, MOBI, FB2, DOCX, CBZ, ZIP, HTMLZ, etc.)
+    if (Extractor::BookExtractorManager::instance().isFormatSupported(bookPath)) {
+        std::vector<uint8_t> coverBytes;
+        if (Extractor::BookExtractorManager::instance().extractCover(bookPath, coverBytes) && !coverBytes.empty()) {
+            if (saveResizedThumbnailFromMemory(coverBytes.data(), coverBytes.size(), outThumbnailPath, maxW, maxH)) {
+                return true;
+            }
+        }
+    }
+
+    // 2. Fallback para documentos renderizados via MuPDF (PDF, XPS, ou fallback de EPUB/CBZ)
     return saveResizedThumbnail(bookPath, outThumbnailPath, maxW, maxH);
 }
 

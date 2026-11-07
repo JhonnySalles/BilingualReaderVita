@@ -31,6 +31,30 @@ std::string FileBrowser::formatFileSize(size_t bytes) {
     return ss.str();
 }
 
+std::string FileBrowser::formatLastReadDate(uint64_t timestamp) {
+    if (timestamp == 0) {
+        return "--/--/----";
+    }
+
+    time_t t = static_cast<time_t>(timestamp);
+    struct tm* tmInfo = localtime(&t);
+    if (!tmInfo) return "--/--/----";
+
+    time_t now = time(nullptr);
+    struct tm* nowInfo = localtime(&now);
+
+    if (nowInfo && tmInfo->tm_year == nowInfo->tm_year && tmInfo->tm_yday == nowInfo->tm_yday) {
+        return "Hoje";
+    }
+    if (nowInfo && tmInfo->tm_year == nowInfo->tm_year && tmInfo->tm_yday == nowInfo->tm_yday - 1) {
+        return "Ontem";
+    }
+
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%02d/%02d/%04d", tmInfo->tm_mday, tmInfo->tm_mon + 1, tmInfo->tm_year + 1900);
+    return std::string(buf);
+}
+
 FileType FileBrowser::getFileType(const std::string& name) {
     std::string ext = FileUtils::getExtension(name);
     if (ext == "txt") return FileType::TXT;
@@ -42,7 +66,18 @@ FileType FileBrowser::getFileType(const std::string& name) {
     if (ext == "tar") return FileType::TAR;
     if (ext == "cb7") return FileType::CB7;
     if (ext == "7z") return FileType::SEVEN_ZIP;
-    if (ext == "epub") return FileType::EPUB;
+    if (ext == "epub" || ext == "kepub") return FileType::EPUB;
+    if (ext == "pdf") return FileType::PDF;
+    if (ext == "xps") return FileType::XPS;
+    if (ext == "fb2") return FileType::FB2;
+    if (ext == "mobi" || ext == "azw" || ext == "azw3" || ext == "azw4" || ext == "prc" || ext == "pdb") return FileType::MOBI;
+    if (ext == "docx" || ext == "doc" || ext == "odt" || ext == "rtf") return FileType::DOCX;
+    if (ext == "htmlz") return FileType::HTMLZ;
+    if (ext == "txtz") return FileType::TXTZ;
+    if (ext == "pmlz") return FileType::PMLZ;
+    if (ext == "tcr") return FileType::TCR;
+    if (ext == "md" || ext == "markdown") return FileType::MD;
+    if (ext == "html" || ext == "htm" || ext == "xhtml" || ext == "xhtm" || ext == "mht" || ext == "mhtml") return FileType::HTML;
     return FileType::UNKNOWN;
 }
 
@@ -56,6 +91,26 @@ bool FileBrowser::isMangaType(FileType type) {
         case FileType::TAR:
         case FileType::CB7:
         case FileType::SEVEN_ZIP:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool FileBrowser::isBookType(FileType type) {
+    switch (type) {
+        case FileType::EPUB:
+        case FileType::PDF:
+        case FileType::XPS:
+        case FileType::FB2:
+        case FileType::MOBI:
+        case FileType::DOCX:
+        case FileType::HTMLZ:
+        case FileType::TXTZ:
+        case FileType::PMLZ:
+        case FileType::TCR:
+        case FileType::MD:
+        case FileType::HTML:
             return true;
         default:
             return false;
@@ -78,22 +133,48 @@ static std::string getMetaFilePath() {
 
 void FileBrowser::loadMetadata(std::vector<LibraryItem>& items) {
     std::ifstream in(getMetaFilePath());
-    if (!in.is_open()) return;
-
-    std::string filename;
-    int fav;
-    uint64_t lastRead;
-
-    while (in >> filename >> fav >> lastRead) {
+    if (!in.is_open()) {
         for (auto& item : items) {
-            if (item.filename == filename) {
-                item.isFavorite = (fav != 0);
-                item.lastReadTime = lastRead;
-                break;
+            item.lastReadFormatted = formatLastReadDate(item.lastReadTime);
+        }
+        return;
+    }
+
+    std::string line;
+    while (std::getline(in, line)) {
+        if (line.empty()) continue;
+        std::istringstream iss(line);
+        std::string filename;
+        int fav = 0;
+        uint64_t lastRead = 0;
+        int curPage = 0;
+        int totPages = 0;
+
+        if (iss >> filename >> fav >> lastRead) {
+            iss >> curPage >> totPages;
+            for (auto& item : items) {
+                if (item.filename == filename) {
+                    item.isFavorite = (fav != 0);
+                    item.lastReadTime = lastRead;
+                    item.currentPage = curPage;
+                    item.totalPages = totPages;
+                    if (totPages > 0) {
+                        item.progressPercent = (static_cast<float>(curPage + 1) / static_cast<float>(totPages)) * 100.0f;
+                        if (item.progressPercent > 100.0f) item.progressPercent = 100.0f;
+                    }
+                    item.lastReadFormatted = formatLastReadDate(lastRead);
+                    break;
+                }
             }
         }
     }
     in.close();
+
+    for (auto& item : items) {
+        if (item.lastReadFormatted.empty()) {
+            item.lastReadFormatted = formatLastReadDate(item.lastReadTime);
+        }
+    }
 }
 
 void FileBrowser::saveMetadata(const std::vector<LibraryItem>& items) {
@@ -101,13 +182,15 @@ void FileBrowser::saveMetadata(const std::vector<LibraryItem>& items) {
     if (!out.is_open()) return;
 
     for (const auto& item : items) {
-        out << item.filename << " " << (item.isFavorite ? 1 : 0) << " " << item.lastReadTime << "\n";
+        out << item.filename << " " << (item.isFavorite ? 1 : 0) << " " << item.lastReadTime
+            << " " << item.currentPage << " " << item.totalPages << "\n";
     }
     out.close();
 }
 
 void FileBrowser::markAsRead(LibraryItem& item) {
     item.lastReadTime = static_cast<uint64_t>(time(nullptr));
+    item.lastReadFormatted = formatLastReadDate(item.lastReadTime);
 }
 
 void FileBrowser::toggleFavorite(LibraryItem& item) {
@@ -214,6 +297,17 @@ std::vector<LibraryItem> FileBrowser::scanLibrary() {
                 case FileType::CB7: item.typeString = "CB7"; break;
                 case FileType::SEVEN_ZIP: item.typeString = "7Z"; break;
                 case FileType::EPUB: item.typeString = "EPUB"; break;
+                case FileType::PDF: item.typeString = "PDF"; break;
+                case FileType::XPS: item.typeString = "XPS"; break;
+                case FileType::FB2: item.typeString = "FB2"; break;
+                case FileType::MOBI: item.typeString = "MOBI"; break;
+                case FileType::DOCX: item.typeString = "DOCX"; break;
+                case FileType::HTMLZ: item.typeString = "HTMLZ"; break;
+                case FileType::TXTZ: item.typeString = "TXTZ"; break;
+                case FileType::PMLZ: item.typeString = "PMLZ"; break;
+                case FileType::TCR: item.typeString = "TCR"; break;
+                case FileType::MD: item.typeString = "MD"; break;
+                case FileType::HTML: item.typeString = "HTML"; break;
                 default: item.typeString = "???"; break;
             }
 

@@ -1,4 +1,4 @@
-// Copyright (C) 2004-2023 Artifex Software, Inc.
+// Copyright (C) 2004-2025 Artifex Software, Inc.
 //
 // This file is part of MuPDF.
 //
@@ -39,6 +39,7 @@ typedef struct
 	union {
 		struct {
 			int color_transform; /* Use -1 for unset */
+			int invert_cmyk; /* Use 1 for standalone JPEG files */
 		} jpeg;
 		struct {
 			int smask_in_data;
@@ -71,6 +72,14 @@ typedef struct
 			int colors;
 			int predictor;
 			int bpc;
+		}
+		brotli;
+		struct
+		{
+			int columns;
+			int colors;
+			int predictor;
+			int bpc;
 			int early_change;
 		} lzw;
 	} u;
@@ -82,9 +91,15 @@ typedef struct
 */
 typedef struct
 {
+	int refs;
 	fz_compression_params params;
 	fz_buffer *buffer;
 } fz_compressed_buffer;
+
+/**
+	Take a reference to an fz_compressed_buffer.
+*/
+fz_compressed_buffer *fz_keep_compressed_buffer(fz_context *ctx, fz_compressed_buffer *cbuf);
 
 /**
 	Return the storage size used for a buffer and its data.
@@ -148,6 +163,7 @@ enum
 	FZ_IMAGE_FLATE,
 	FZ_IMAGE_LZW,
 	FZ_IMAGE_RLD,
+	FZ_IMAGE_BROTLI,
 
 	/* Full image formats */
 	FZ_IMAGE_BMP,
@@ -169,5 +185,10 @@ enum
 	Never throws exceptions.
 */
 void fz_drop_compressed_buffer(fz_context *ctx, fz_compressed_buffer *buf);
+
+/**
+	Create a new, UNKNOWN format, compressed_buffer.
+*/
+fz_compressed_buffer *fz_new_compressed_buffer(fz_context *ctx);
 
 #endif

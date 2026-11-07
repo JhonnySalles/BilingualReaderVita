@@ -138,6 +138,15 @@ void UIComponents::drawStar(float x, float y, float size, unsigned int color) {
     vita2d_draw_fill_circle(x + size / 2.0f, y + size / 2.0f, size / 2.2f, color);
 }
 
+float UIComponents::getBadgeWidth(const std::string& type, float scale) {
+    float textW = 36.0f * scale;
+    if (pgf) {
+        textW = static_cast<float>(vita2d_pgf_text_width(pgf, 0.8f * scale, type.c_str()));
+    }
+    float padX = 10.0f * scale;
+    return std::max(52.0f * scale, textW + padX * 2.0f);
+}
+
 void UIComponents::drawBadge(float x, float y, const std::string& type, float scale, float alpha) {
     if (alpha <= 0.01f) return;
     unsigned int badgeColor = UITheme::BadgeTXT;
@@ -150,13 +159,29 @@ void UIComponents::drawBadge(float x, float y, const std::string& type, float sc
     else if (type == "CB7") badgeColor = UITheme::BadgeCB7;
     else if (type == "7Z") badgeColor = UITheme::Badge7Z;
     else if (type == "EPUB") badgeColor = UITheme::BadgeEPUB;
+    else if (type == "PDF" || type == "XPS") badgeColor = UITheme::BadgePDF;
+    else if (type == "FB2") badgeColor = UITheme::BadgeFB2;
+    else if (type == "MOBI") badgeColor = UITheme::BadgeMOBI;
+    else if (type == "DOCX") badgeColor = UITheme::BadgeDOCX;
+    else if (type == "HTMLZ") badgeColor = UITheme::BadgeHTMLZ;
+    else if (type == "TXTZ") badgeColor = UITheme::BadgeTXTZ;
+    else if (type == "PMLZ") badgeColor = UITheme::BadgePMLZ;
+    else if (type == "TCR") badgeColor = UITheme::BadgeTCR;
+    else if (type == "HTML") badgeColor = UITheme::BadgeHTML;
+    else if (type == "MD") badgeColor = UITheme::BadgeMD;
 
-    float w = 54.0f * scale;
+    float textW = 0.0f;
+    if (pgf) {
+        textW = static_cast<float>(vita2d_pgf_text_width(pgf, 0.8f * scale, type.c_str()));
+    }
+    float padX = 10.0f * scale;
+    float w = std::max(52.0f * scale, textW + padX * 2.0f);
     float h = 22.0f * scale;
     drawRoundedBox(x, y, w, h, 5.0f * scale, applyAlpha(badgeColor, alpha));
 
     if (pgf) {
-        vita2d_pgf_draw_text(pgf, x + 8.0f * scale, y + 16.0f * scale, applyAlpha(RGBA8(255, 255, 255, 255), alpha), 0.8f * scale, type.c_str());
+        float textX = x + (w - textW) / 2.0f;
+        vita2d_pgf_draw_text(pgf, textX, y + 16.0f * scale, applyAlpha(RGBA8(255, 255, 255, 255), alpha), 0.8f * scale, type.c_str());
     }
 }
 
@@ -464,28 +489,65 @@ void UIComponents::drawListCard(float x, float y, float w, float h, bool isSelec
             }
         }
     } else {
-        // Badge centralizado no mesmo slot
-        drawBadge(slotX + (slotW - 40.0f) / 2.0f, slotY + (slotH - 22.0f) / 2.0f, item.typeString, 1.0f, alpha);
+        // Badge centralizado no mesmo slot com auto-expansão
+        float bW = getBadgeWidth(item.typeString, 0.85f);
+        float bX = (bW <= slotW) ? (slotX + (slotW - bW) / 2.0f) : (slotX + 2.0f);
+        drawBadge(bX, slotY + (slotH - 20.0f) / 2.0f, item.typeString, 0.85f, alpha);
     }
 
-    // Título
     if (pgf) {
+        // 1. Título
         std::string displayTitle = item.filename;
-        if (displayTitle.length() > 40) {
-            displayTitle = displayTitle.substr(0, 37) + "...";
+        if (displayTitle.length() > 42) {
+            displayTitle = displayTitle.substr(0, 39) + "...";
         }
-        
         unsigned int titleColor = isSelected ? UITheme::TextPrimary : UITheme::TextSecondary;
-        vita2d_pgf_draw_text(pgf, x + 68.0f, y + 26.0f, applyAlpha(titleColor, alpha), 1.0f, displayTitle.c_str());
+        vita2d_pgf_draw_text(pgf, x + 68.0f, y + 21.0f, applyAlpha(titleColor, alpha), 0.95f, displayTitle.c_str());
 
         // Indicador de favorito
         if (item.isFavorite) {
-            drawStar(x + w - 160.0f, y + 16.0f, 16.0f, applyAlpha(UITheme::FavoriteGold, alpha));
-            vita2d_pgf_draw_text(pgf, x + w - 140.0f, y + 26.0f, applyAlpha(UITheme::FavoriteGold, alpha), 0.8f, "FAV");
+            drawStar(x + w - 160.0f, y + 12.0f, 14.0f, applyAlpha(UITheme::FavoriteGold, alpha));
+            vita2d_pgf_draw_text(pgf, x + w - 142.0f, y + 21.0f, applyAlpha(UITheme::FavoriteGold, alpha), 0.75f, "FAV");
         }
 
-        // Tamanho do arquivo
-        vita2d_pgf_draw_text(pgf, x + w - 90.0f, y + 26.0f, applyAlpha(UITheme::TextSecondary, alpha), 0.8f, item.formattedSize.c_str());
+        // 2. Linha Intermediária (Progresso de Leitura / Informações do livro ou mangá)
+        if (item.totalPages > 0) {
+            char progStr[64];
+            snprintf(progStr, sizeof(progStr), "Pag %d / %d (%.0f%%)", item.currentPage + 1, item.totalPages, item.progressPercent);
+            vita2d_pgf_draw_text(pgf, x + 68.0f, y + 38.0f, applyAlpha(UITheme::TextSecondary, alpha), 0.75f, progStr);
+
+            // Mini barra de progresso horizontal
+            float barX = x + 240.0f;
+            float barY = y + 31.0f;
+            float barW = 110.0f;
+            float barH = 4.0f;
+            float fillW = std::max(0.0f, std::min(barW, barW * (item.progressPercent / 100.0f)));
+
+            drawRoundedBox(barX, barY, barW, barH, 2.0f, applyAlpha(RGBA8(255, 255, 255, 30), alpha));
+            if (fillW > 0.0f) {
+                unsigned int barColor = (item.progressPercent >= 100.0f) ? RGBA8(16, 185, 129, 255) : UITheme::Primary;
+                drawRoundedBox(barX, barY, fillW, barH, 2.0f, applyAlpha(barColor, alpha));
+            }
+        } else {
+            const char* typeDesc = FileBrowser::isMangaType(item.type) ? "Manga / Quadrinho" : "Livro Digital";
+            vita2d_pgf_draw_text(pgf, x + 68.0f, y + 38.0f, applyAlpha(UITheme::TextSecondary, alpha), 0.75f, typeDesc);
+        }
+
+        // 3. Linha do Rodapé (Tamanho no início, Extensão no meio, Data da última leitura no final)
+        float footerY = y + 54.0f;
+
+        // Tamanho à esquerda
+        vita2d_pgf_draw_text(pgf, x + 68.0f, footerY, applyAlpha(UITheme::TextSecondary, alpha), 0.70f, item.formattedSize.c_str());
+
+        // Extensão no meio
+        float centerAreaX = x + 240.0f;
+        vita2d_pgf_draw_text(pgf, centerAreaX, footerY, applyAlpha(UITheme::Primary, alpha), 0.70f, item.typeString.c_str());
+
+        // Data da última leitura à direita
+        std::string dateStr = item.lastReadFormatted.empty() ? "--/--/----" : item.lastReadFormatted;
+        float dateW = static_cast<float>(vita2d_pgf_text_width(pgf, 0.70f, dateStr.c_str()));
+        float dateX = x + w - 24.0f - dateW;
+        vita2d_pgf_draw_text(pgf, dateX, footerY, applyAlpha(UITheme::TextSecondary, alpha), 0.70f, dateStr.c_str());
     }
 }
 
@@ -531,8 +593,10 @@ void UIComponents::drawGridCard(float x, float y, float w, float h, bool isSelec
             }
         }
     } else {
-        // Grande Badge no centro da capa
-        drawBadge(coverX + (coverW - 64.0f) / 2.0f, coverY + (coverH - 26.0f) / 2.0f, item.typeString, 1.2f, alpha);
+        // Grande Badge no centro da capa com auto-expansão para HTMLZ e outras extensões
+        float bW = getBadgeWidth(item.typeString, 1.2f);
+        float bH = 26.0f;
+        drawBadge(coverX + (coverW - bW) / 2.0f, coverY + (coverH - bH) / 2.0f, item.typeString, 1.2f, alpha);
     }
 
     // Indicador de Favorito no canto superior direito da capa
@@ -540,17 +604,54 @@ void UIComponents::drawGridCard(float x, float y, float w, float h, bool isSelec
         drawStar(coverX + coverW - 22.0f, coverY + 6.0f, 14.0f, applyAlpha(UITheme::FavoriteGold, alpha));
     }
 
-    // Título abreviado embaixo
     if (pgf) {
+        // 1. Título embaixo da capa
         std::string displayTitle = item.filename;
         if (displayTitle.length() > 22) {
             displayTitle = displayTitle.substr(0, 19) + "...";
         }
         unsigned int titleColor = isSelected ? UITheme::TextPrimary : UITheme::TextSecondary;
-        vita2d_pgf_draw_text(pgf, x + 10.0f, y + coverH + 28.0f, applyAlpha(titleColor, alpha), 0.9f, displayTitle.c_str());
+        vita2d_pgf_draw_text(pgf, x + 10.0f, y + coverH + 24.0f, applyAlpha(titleColor, alpha), 0.85f, displayTitle.c_str());
 
-        // Tamanho do arquivo
-        vita2d_pgf_draw_text(pgf, x + 10.0f, y + coverH + 50.0f, applyAlpha(UITheme::TextSecondary, alpha), 0.75f, item.formattedSize.c_str());
+        // 2. Linha Intermediária (Progresso de Leitura / Informações adicionais)
+        if (item.totalPages > 0) {
+            char progStr[64];
+            snprintf(progStr, sizeof(progStr), "Pag %d / %d (%.0f%%)", item.currentPage + 1, item.totalPages, item.progressPercent);
+            vita2d_pgf_draw_text(pgf, x + 10.0f, y + coverH + 42.0f, applyAlpha(UITheme::TextSecondary, alpha), 0.70f, progStr);
+
+            // Mini barra de progresso horizontal
+            float barX = x + 10.0f;
+            float barY = y + coverH + 48.0f;
+            float barW = w - 20.0f;
+            float barH = 3.0f;
+            float fillW = std::max(0.0f, std::min(barW, barW * (item.progressPercent / 100.0f)));
+
+            drawRoundedBox(barX, barY, barW, barH, 1.5f, applyAlpha(RGBA8(255, 255, 255, 30), alpha));
+            if (fillW > 0.0f) {
+                unsigned int barColor = (item.progressPercent >= 100.0f) ? RGBA8(16, 185, 129, 255) : UITheme::Primary;
+                drawRoundedBox(barX, barY, fillW, barH, 1.5f, applyAlpha(barColor, alpha));
+            }
+        } else {
+            const char* typeDesc = FileBrowser::isMangaType(item.type) ? "Manga / Quadrinho" : "Livro Digital";
+            vita2d_pgf_draw_text(pgf, x + 10.0f, y + coverH + 42.0f, applyAlpha(UITheme::TextSecondary, alpha), 0.70f, typeDesc);
+        }
+
+        // 3. Linha do Rodapé no final do card: Tamanho (esq) | Extensão (centro) | Data Última Leitura (dir)
+        float footerY = y + h - 10.0f;
+
+        // Esquerda: tamanho
+        vita2d_pgf_draw_text(pgf, x + 10.0f, footerY, applyAlpha(UITheme::TextSecondary, alpha), 0.68f, item.formattedSize.c_str());
+
+        // Centro: extensão
+        float extW = static_cast<float>(vita2d_pgf_text_width(pgf, 0.68f, item.typeString.c_str()));
+        float extX = x + (w - extW) / 2.0f;
+        vita2d_pgf_draw_text(pgf, extX, footerY, applyAlpha(UITheme::Primary, alpha), 0.68f, item.typeString.c_str());
+
+        // Direita: data da última leitura
+        std::string dateStr = item.lastReadFormatted.empty() ? "--/--/----" : item.lastReadFormatted;
+        float dateW = static_cast<float>(vita2d_pgf_text_width(pgf, 0.68f, dateStr.c_str()));
+        float dateX = x + w - 10.0f - dateW;
+        vita2d_pgf_draw_text(pgf, dateX, footerY, applyAlpha(UITheme::TextSecondary, alpha), 0.68f, dateStr.c_str());
     }
 }
 

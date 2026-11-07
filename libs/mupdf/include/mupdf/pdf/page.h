@@ -1,4 +1,4 @@
-// Copyright (C) 2004-2021 Artifex Software, Inc.
+// Copyright (C) 2004-2026 Artifex Software, Inc.
 //
 // This file is part of MuPDF.
 //
@@ -25,11 +25,20 @@
 
 #include "mupdf/pdf/interpret.h"
 
+pdf_page *pdf_keep_page(fz_context *ctx, pdf_page *page);
+void pdf_drop_page(fz_context *ctx, pdf_page *page);
+
 int pdf_lookup_page_number(fz_context *ctx, pdf_document *doc, pdf_obj *pageobj);
 int pdf_count_pages(fz_context *ctx, pdf_document *doc);
 int pdf_count_pages_imp(fz_context *ctx, fz_document *doc, int chapter);
 pdf_obj *pdf_lookup_page_obj(fz_context *ctx, pdf_document *doc, int needle);
 pdf_obj *pdf_lookup_page_loc(fz_context *ctx, pdf_document *doc, int needle, pdf_obj **parentp, int *indexp);
+
+/*
+	Enable or disable the page tree cache that is used to speed up page object lookups.
+	The page tree cache is used unless explicitly disabled with this function.
+*/
+void pdf_set_page_tree_cache(fz_context *ctx, pdf_document *doc, int enabled);
 
 /*
 	Cache the page tree for fast forward/reverse page lookups.
@@ -47,8 +56,12 @@ void pdf_load_page_tree(fz_context *ctx, pdf_document *doc);
 */
 void pdf_drop_page_tree(fz_context *ctx, pdf_document *doc);
 
-void pdf_drop_page_tree_internal(fz_context *ctx, pdf_document *doc);
+/*
+	Internal function used to drop the page tree.
 
+	Library users should not call this directly.
+*/
+void pdf_drop_page_tree_internal(fz_context *ctx, pdf_document *doc);
 
 /*
 	Make page self sufficient.
@@ -69,16 +82,86 @@ void pdf_flatten_inheritable_page_items(fz_context *ctx, pdf_obj *page);
 	number: page number, where 0 is the first page of the document.
 */
 pdf_page *pdf_load_page(fz_context *ctx, pdf_document *doc, int number);
+
+/*
+	Internal function to perform pdf_load_page.
+
+	Do not call this directly.
+*/
 fz_page *pdf_load_page_imp(fz_context *ctx, fz_document *doc, int chapter, int number);
+
+/*
+	Enquire as to whether a given page uses transparency or not.
+*/
 int pdf_page_has_transparency(fz_context *ctx, pdf_page *page);
 
-void pdf_page_obj_transform(fz_context *ctx, pdf_obj *pageobj, fz_rect *page_mediabox, fz_matrix *page_ctm);
-void pdf_page_transform(fz_context *ctx, pdf_page *page, fz_rect *mediabox, fz_matrix *ctm);
-void pdf_page_obj_transform_box(fz_context *ctx, pdf_obj *pageobj, fz_rect *page_mediabox, fz_matrix *page_ctm, fz_box_type box);
+/*
+	Fetch the given box for a page, together with a transform that converts
+	from fitz coords to PDF coords.
+
+	pageobj: The object that represents the page.
+
+	outbox: If non-NULL, this will be filled in with the requested box
+	in fitz coordinates.
+
+	outctm: A transform to map from fitz page space to PDF page space.
+
+	box: Which box to return.
+*/
+void pdf_page_obj_transform_box(fz_context *ctx, pdf_obj *pageobj, fz_rect *outbox, fz_matrix *out, fz_box_type box);
+
+/*
+	As for pdf_page_obj_transform_box, always requesting the
+	cropbox.
+*/
+void pdf_page_obj_transform(fz_context *ctx, pdf_obj *pageobj, fz_rect *outbox, fz_matrix *outctm);
+
+/*
+	As for pdf_page_obj_transform_box, but working from a pdf_page
+	object rather than the pdf_obj representing the page.
+*/
 void pdf_page_transform_box(fz_context *ctx, pdf_page *page, fz_rect *mediabox, fz_matrix *ctm, fz_box_type box);
+
+/*
+	As for pdf_page_transform_box, always requesting the
+	cropbox.
+*/
+void pdf_page_transform(fz_context *ctx, pdf_page *page, fz_rect *mediabox, fz_matrix *ctm);
+
+/*
+	Find the pdf object that represents the resources dictionary
+	for a page.
+
+	This is a borrowed pointer that the caller should pdf_keep_obj
+	if. This may be NULL.
+*/
 pdf_obj *pdf_page_resources(fz_context *ctx, pdf_page *page);
+
+/*
+	Find the pdf object that represents the page contents
+	for a page.
+
+	This is a borrowed pointer that the caller should pdf_keep_obj
+	if. This may be NULL.
+*/
 pdf_obj *pdf_page_contents(fz_context *ctx, pdf_page *page);
+
+/*
+	Find the pdf object that represents the transparency group
+	for a page.
+
+	This is a borrowed pointer that the caller should pdf_keep_obj
+	if. This may be NULL.
+*/
 pdf_obj *pdf_page_group(fz_context *ctx, pdf_page *page);
+
+/*
+	Modify the page boxes (using fitz space coordinates).
+
+	Note that changing the CropBox will change the fitz coordinate space mapping,
+	invalidating all bounding boxes previously acquired.
+*/
+void pdf_set_page_box(fz_context *ctx, pdf_page *page, fz_box_type box, fz_rect rect);
 
 /*
 	Get the separation details for a page.
@@ -87,7 +170,7 @@ fz_separations *pdf_page_separations(fz_context *ctx, pdf_page *page);
 
 pdf_ocg_descriptor *pdf_read_ocg(fz_context *ctx, pdf_document *doc);
 void pdf_drop_ocg(fz_context *ctx, pdf_document *doc);
-int pdf_is_ocg_hidden(fz_context *ctx, pdf_document *doc, pdf_obj *rdb, const char *usage, pdf_obj *ocg);
+int pdf_is_ocg_hidden(fz_context *ctx, pdf_document *doc, pdf_resource_stack *rdb, const char *usage, pdf_obj *ocg);
 
 fz_link *pdf_load_links(fz_context *ctx, pdf_page *page);
 
@@ -188,11 +271,30 @@ enum {
 	PDF_REDACT_LINE_ART_REMOVE_IF_TOUCHED
 };
 
+enum {
+	/* Remove any text that overlaps with the redaction region,
+	 * however slightly. This is the default option, and is the
+	 * correct option for secure behaviour. */
+	PDF_REDACT_TEXT_REMOVE,
+	/* Do not remove any text at all as part of this redaction
+	 * operation. Using this option is INSECURE! Use at your own
+	 * risk. */
+	PDF_REDACT_TEXT_NONE,
+	/* Remove any invisible text that overlaps with the redaction
+	 * region however slightly. This is intended to allow the
+	 * removal of invisible text layers added by OCR passes.
+	 * This will remove text that is made invisible by rendering
+	 * mode, but will NOT remove other cases (like white-on-white
+	 * text, etc). */
+	PDF_REDACT_TEXT_REMOVE_INVISIBLE,
+};
+
 typedef struct
 {
 	int black_boxes;
 	int image_method;
 	int line_art;
+	int text;
 } pdf_redact_options;
 
 int pdf_redact_page(fz_context *ctx, pdf_document *doc, pdf_page *page, pdf_redact_options *opts);
@@ -200,6 +302,10 @@ int pdf_redact_page(fz_context *ctx, pdf_document *doc, pdf_page *page, pdf_reda
 fz_transition *pdf_page_presentation(fz_context *ctx, pdf_page *page, fz_transition *transition, float *duration);
 
 fz_default_colorspaces *pdf_load_default_colorspaces(fz_context *ctx, pdf_document *doc, pdf_page *page);
+
+void pdf_clip_page(fz_context *ctx, pdf_page *page, fz_rect clip);
+
+void pdf_vectorize_page(fz_context *ctx, pdf_page *page);
 
 /*
 	Update default colorspaces for an xobject.
@@ -223,5 +329,14 @@ struct pdf_page
 	pdf_annot *annots, **annot_tailp;
 	pdf_annot *widgets, **widget_tailp;
 };
+
+/* Keep pdf_page, pdf_annot, and pdf_link structs in sync with underlying pdf objects. */
+void pdf_sync_open_pages(fz_context *ctx, pdf_document *doc);
+void pdf_sync_page(fz_context *ctx, pdf_page *page);
+void pdf_sync_links(fz_context *ctx, pdf_page *page);
+void pdf_sync_annots(fz_context *ctx, pdf_page *page);
+void pdf_nuke_page(fz_context *ctx, pdf_page *page);
+void pdf_nuke_links(fz_context *ctx, pdf_page *page);
+void pdf_nuke_annots(fz_context *ctx, pdf_page *page);
 
 #endif

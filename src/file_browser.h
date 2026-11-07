@@ -14,6 +14,17 @@ enum class FileType {
     TAR,
     SEVEN_ZIP,
     EPUB,
+    PDF,
+    XPS,
+    FB2,
+    MOBI,
+    DOCX,
+    HTMLZ,
+    TXTZ,
+    PMLZ,
+    TCR,
+    MD,
+    HTML,
     UNKNOWN
 };
 
@@ -34,6 +45,10 @@ struct LibraryItem {
     std::string formattedSize;
     bool isFavorite = false;
     uint64_t lastReadTime = 0;
+    int currentPage = 0;
+    int totalPages = 0;
+    float progressPercent = 0.0f;
+    std::string lastReadFormatted;
 };
 
 class FileBrowser {
@@ -41,6 +56,7 @@ public:
     static void ensureDirectoryExists();
     static std::vector<LibraryItem> scanLibrary();
     static std::string formatFileSize(size_t bytes);
+    static std::string formatLastReadDate(uint64_t timestamp);
 
     static void sortItems(std::vector<LibraryItem>& items, SortMode mode);
     static std::vector<LibraryItem> filterItems(const std::vector<LibraryItem>& items, const std::string& query);
@@ -54,4 +70,5 @@ public:
 
     static FileType getFileType(const std::string& filename);
     static bool isMangaType(FileType type);
+    static bool isBookType(FileType type);
 };

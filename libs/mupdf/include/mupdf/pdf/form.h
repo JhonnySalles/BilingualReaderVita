@@ -1,4 +1,4 @@
-// Copyright (C) 2004-2021 Artifex Software, Inc.
+// Copyright (C) 2004-2025 Artifex Software, Inc.
 //
 // This file is part of MuPDF.
 //
@@ -207,7 +207,8 @@ typedef enum
 	PDF_SIGNATURE_ERROR_SELF_SIGNED,
 	PDF_SIGNATURE_ERROR_SELF_SIGNED_IN_CHAIN,
 	PDF_SIGNATURE_ERROR_NOT_TRUSTED,
-	PDF_SIGNATURE_ERROR_UNKNOWN
+	PDF_SIGNATURE_ERROR_NOT_SIGNED,
+	PDF_SIGNATURE_ERROR_UNKNOWN,
 } pdf_signature_error;
 
 /* Increment the reference count for a signer object */
@@ -272,7 +273,7 @@ pdf_signature_error pdf_check_widget_certificate(fz_context *ctx, pdf_pkcs7_veri
 void pdf_clear_signature(fz_context *ctx, pdf_annot *widget);
 
 /*
-	Sign a signature field, while assigning it an arbitrary apparance determined by a display list.
+	Sign a signature field, while assigning it an arbitrary appearance determined by a display list.
 	The function pdf_signature_appearance can generate a variety of common signature appearances.
 */
 void pdf_sign_signature_with_appearance(fz_context *ctx, pdf_annot *widget, pdf_pkcs7_signer *signer, int64_t date, fz_display_list *disp_list);
@@ -323,14 +324,6 @@ fz_pixmap *pdf_preview_signature_as_pixmap(fz_context *ctx,
 	const char *reason,
 	const char *location);
 
-/*
-	check a signature's certificate chain and digest
-
-	This is a helper function defined to provide compatibility with older
-	versions of mupdf
-*/
-int pdf_check_signature(fz_context *ctx, pdf_pkcs7_verifier *verifier, pdf_document *doc, pdf_obj *signature, char *ebuf, size_t ebufsize);
-
 void pdf_drop_signer(fz_context *ctx, pdf_pkcs7_signer *signer);
 void pdf_drop_verifier(fz_context *ctx, pdf_pkcs7_verifier *verifier);
 
@@ -378,5 +371,11 @@ void pdf_annot_event_page_open(fz_context *ctx, pdf_annot *annot);
 void pdf_annot_event_page_close(fz_context *ctx, pdf_annot *annot);
 void pdf_annot_event_page_visible(fz_context *ctx, pdf_annot *annot);
 void pdf_annot_event_page_invisible(fz_context *ctx, pdf_annot *annot);
+
+/*
+ * Bake appearances of annotations and/or widgets into static page content,
+ * and remove the corresponding interactive PDF objects.
+ */
+void pdf_bake_document(fz_context *ctx, pdf_document *doc, int bake_annots, int bake_widgets);
 
 #endif
