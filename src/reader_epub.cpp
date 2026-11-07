@@ -541,6 +541,19 @@ void ReaderEPUB::prevPage() {
     }
 }
 
+void ReaderEPUB::goToPage(int pageIndex) {
+    if (pageIndex < 0) pageIndex = 0;
+    if (totalPages > 0 && pageIndex >= totalPages) pageIndex = totalPages - 1;
+    if (pageIndex == currentPage && pageTexture) return;
+
+    cancelAnimation(false);
+    resetZoom();
+    scrollY = 0.0f;
+    currentPage = pageIndex;
+    renderCurrentPageToTexture();
+    syncScrollTextures();
+}
+
 void ReaderEPUB::render(vita2d_pgf* font, bool fullscreen) {
     float screenW = isRotated ? 544.0f : 960.0f; 
     float screenH = isRotated ? 960.0f : 544.0f;

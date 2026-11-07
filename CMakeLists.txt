@@ -75,6 +75,7 @@ set(SOURCES
   src/extractors/mobi_extractor.cpp
   src/extractors/archive_book_extractor.cpp
   src/extractors/book_extractor_manager.cpp
+  src/extractors/comicinfo_parser.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})

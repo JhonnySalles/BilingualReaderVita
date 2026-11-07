@@ -523,6 +523,19 @@ void ReaderCBZ::setRotated(bool rotated) {
     }
 }
 
+void ReaderCBZ::goToPage(int pageIndex) {
+    if (pageIndex < 0) pageIndex = 0;
+    if (totalPages > 0 && pageIndex >= totalPages) pageIndex = totalPages - 1;
+    if (pageIndex == currentPage && currentTexture) return;
+
+    cancelAnimation(false);
+    resetZoom();
+    scrollY = 0.0f;
+    currentPage = pageIndex;
+    loadPageTexture(pageIndex);
+    syncScrollTextures();
+}
+
 vita2d_texture* ReaderCBZ::createPageTexture(int pageIndex) {
     if (pageIndex < 0 || pageIndex >= totalPages) return nullptr;
 

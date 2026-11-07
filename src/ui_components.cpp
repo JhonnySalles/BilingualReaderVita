@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cmath>
+#include <sstream>
 
 vita2d_pgf* UIComponents::pgf = nullptr;
 vita2d_texture* UIComponents::appIcon = nullptr;
@@ -1382,6 +1383,433 @@ void UIComponents::drawUnlinkedCard(
         drawRoundedBox(drawX + 4.0f, drawY + 4.0f, bW, 16.0f, 3.0f, applyAlpha(UITheme::Background, 0.90f));
         vita2d_pgf_draw_text(pgf, drawX + 8.0f, drawY + 16.0f, UITheme::BadgeTXT, 0.70f, buf);
     }
+}
+
+UIDetailLayout UIComponents::getDetailLayout(bool isRotated) {
+    UIDetailLayout layout;
+    float sW = isRotated ? 544.0f : 960.0f;
+    float sH = isRotated ? 960.0f : 544.0f;
+
+    layout.backBtn = {16.0f, 10.0f, 90.0f, 32.0f};
+
+    if (!isRotated) {
+        layout.coverCard = {24.0f, 54.0f, 140.0f, 200.0f};
+
+        float btnY = 262.0f;
+        float btnW = 145.0f;
+        float btnH = 34.0f;
+        float gap = 8.0f;
+        float startX = 24.0f;
+
+        layout.btnRead         = {startX, btnY, btnW, btnH};
+        layout.btnFavorite     = {startX + (btnW + gap), btnY, btnW, btnH};
+        layout.btnMarkRead     = {startX + (btnW + gap) * 2.0f, btnY, btnW, btnH};
+        layout.btnClearHistory = {startX + (btnW + gap) * 3.0f, btnY, btnW, btnH};
+        layout.btnLink         = {startX + (btnW + gap) * 4.0f, btnY, btnW, btnH};
+        layout.btnDelete       = {startX + (btnW + gap) * 5.0f, btnY, btnW, btnH};
+
+        float tabY = 306.0f;
+        float tabW = 296.0f;
+        float tabH = 32.0f;
+        layout.tabInfo     = {24.0f, tabY, tabW, tabH};
+        layout.tabChapters = {24.0f + tabW + 12.0f, tabY, tabW, tabH};
+        layout.tabLink     = {24.0f + (tabW + 12.0f) * 2.0f, tabY, tabW, tabH};
+
+        layout.contentArea = {24.0f, 346.0f, sW - 48.0f, sH - 346.0f - 32.0f};
+    } else {
+        layout.coverCard = {20.0f, 54.0f, 130.0f, 186.0f};
+
+        float btnY = 250.0f;
+        float btnW = 156.0f;
+        float btnH = 34.0f;
+        float gapX = 12.0f;
+        float gapY = 8.0f;
+        float startX = 20.0f;
+
+        layout.btnRead         = {startX, btnY, btnW, btnH};
+        layout.btnFavorite     = {startX + btnW + gapX, btnY, btnW, btnH};
+        layout.btnMarkRead     = {startX + (btnW + gapX) * 2.0f, btnY, btnW, btnH};
+        layout.btnClearHistory = {startX, btnY + btnH + gapY, btnW, btnH};
+        layout.btnLink         = {startX + btnW + gapX, btnY + btnH + gapY, btnW, btnH};
+        layout.btnDelete       = {startX + (btnW + gapX) * 2.0f, btnY + btnH + gapY, btnW, btnH};
+
+        float tabY = 336.0f;
+        float tabW = 162.0f;
+        float tabH = 32.0f;
+        layout.tabInfo     = {20.0f, tabY, tabW, tabH};
+        layout.tabChapters = {20.0f + tabW + 9.0f, tabY, tabW, tabH};
+        layout.tabLink     = {20.0f + (tabW + 9.0f) * 2.0f, tabY, tabW, tabH};
+
+        layout.contentArea = {20.0f, 376.0f, sW - 40.0f, sH - 376.0f - 32.0f};
+    }
+
+    return layout;
+}
+
+void UIComponents::drawDetailScreen(
+    const LibraryItem& item,
+    const DetailMetadata& meta,
+    vita2d_texture* coverTex,
+    int activeTab,
+    int selectedActionBtn,
+    int selectedChapterIndex,
+    float contentScrollY,
+    bool isCoverModalOpen,
+    bool isRotated
+) {
+    float sW = isRotated ? 544.0f : 960.0f;
+    float sH = isRotated ? 960.0f : 544.0f;
+
+    UIDetailLayout layout = getDetailLayout(isRotated);
+
+    // 1. Top Bar com Botão Voltar e Título
+    drawRoundedBox(layout.backBtn.x, layout.backBtn.y, layout.backBtn.w, layout.backBtn.h, 6.0f, UITheme::Surface);
+    if (pgf) {
+        vita2d_pgf_draw_text(pgf, layout.backBtn.x + 12.0f, layout.backBtn.y + 22.0f, UITheme::TextPrimary, 0.90f, "< Voltar");
+    }
+
+    float badgeX = layout.backBtn.x + layout.backBtn.w + 12.0f;
+    drawBadge(badgeX, layout.backBtn.y + 4.0f, item.typeString, 1.0f);
+
+    float titleX = badgeX + getBadgeWidth(item.typeString) + 14.0f;
+    if (pgf) {
+        std::string dispTitle = !meta.title.empty() ? meta.title : item.filename;
+        if (dispTitle.size() > 50) dispTitle = dispTitle.substr(0, 47) + "...";
+        vita2d_pgf_draw_text(pgf, titleX, layout.backBtn.y + 22.0f, UITheme::TextPrimary, 0.95f, dispTitle.c_str());
+    }
+
+    if (item.isFavorite) {
+        drawStar(sW - 44.0f, layout.backBtn.y + 6.0f, 20.0f, UITheme::FavoriteGold);
+    }
+
+    // 2. Seção Hero (Capa Grande + Detalhes Principais + Progresso)
+    drawRoundedBox(layout.coverCard.x - 2.0f, layout.coverCard.y - 2.0f, layout.coverCard.w + 4.0f, layout.coverCard.h + 4.0f, 8.0f, UITheme::SurfaceActive);
+    drawRoundedBox(layout.coverCard.x, layout.coverCard.y, layout.coverCard.w, layout.coverCard.h, 6.0f, UITheme::CoverBg);
+
+    if (coverTex) {
+        float tw = (float)vita2d_texture_get_width(coverTex);
+        float th = (float)vita2d_texture_get_height(coverTex);
+        if (tw > 0 && th > 0) {
+            float scale = std::min(layout.coverCard.w / tw, layout.coverCard.h / th);
+            float rw = tw * scale;
+            float rh = th * scale;
+            float rx = layout.coverCard.x + (layout.coverCard.w - rw) / 2.0f;
+            float ry = layout.coverCard.y + (layout.coverCard.h - rh) / 2.0f;
+            vita2d_draw_texture_scale(coverTex, rx, ry, scale, scale);
+        }
+    } else {
+        drawBadge(layout.coverCard.x + (layout.coverCard.w - getBadgeWidth(item.typeString, 1.4f)) / 2.0f,
+                  layout.coverCard.y + layout.coverCard.h / 2.0f - 14.0f,
+                  item.typeString, 1.4f);
+    }
+
+    // Informações ao lado da Capa
+    float infoX = layout.coverCard.x + layout.coverCard.w + 18.0f;
+    float infoW = sW - infoX - 24.0f;
+    float curY = layout.coverCard.y + 20.0f;
+
+    if (pgf) {
+        std::string heroTitle = !meta.title.empty() ? meta.title : item.filename;
+        if (heroTitle.size() > 42) heroTitle = heroTitle.substr(0, 39) + "...";
+        vita2d_pgf_draw_text(pgf, infoX, curY, UITheme::TextPrimary, 1.15f, heroTitle.c_str());
+        curY += 24.0f;
+
+        if (!meta.series.empty()) {
+            std::string seriesStr = "Serie: " + meta.series;
+            if (meta.volume > 0) seriesStr += " • Vol. " + std::to_string(meta.volume);
+            if (!meta.number.empty()) seriesStr += " #" + meta.number;
+            if (seriesStr.size() > 48) seriesStr = seriesStr.substr(0, 45) + "...";
+            vita2d_pgf_draw_text(pgf, infoX, curY, UITheme::Secondary, 0.95f, seriesStr.c_str());
+            curY += 22.0f;
+        }
+
+        std::string authorStr = !meta.authors.empty() ? meta.authors : (!meta.writer.empty() ? meta.writer : "");
+        if (!authorStr.empty()) {
+            if (authorStr.size() > 50) authorStr = authorStr.substr(0, 47) + "...";
+            vita2d_pgf_draw_text(pgf, infoX, curY, UITheme::TextSecondary, 0.90f, authorStr.c_str());
+            curY += 22.0f;
+        }
+
+        char progBuf[128];
+        int totPages = (item.totalPages > 0) ? item.totalPages : (meta.count > 0 ? meta.count : 0);
+        if (totPages > 0) {
+            snprintf(progBuf, sizeof(progBuf), "Progresso: Pagina %d de %d  (%.1f%%)", item.currentPage + 1, totPages, item.progressPercent);
+        } else {
+            snprintf(progBuf, sizeof(progBuf), "Nao iniciado  (0%%)");
+        }
+        vita2d_pgf_draw_text(pgf, infoX, curY, UITheme::TextSecondary, 0.85f, progBuf);
+        curY += 12.0f;
+
+        // Barra de progresso visual
+        float pBarW = std::min(infoW, 360.0f);
+        float pBarH = 7.0f;
+        drawRoundedBox(infoX, curY, pBarW, pBarH, 3.5f, UITheme::ProgressBarBg);
+        if (item.progressPercent > 0.0f) {
+            float fillW = std::max(7.0f, (item.progressPercent / 100.0f) * pBarW);
+            drawRoundedBox(infoX, curY, fillW, pBarH, 3.5f, UITheme::Primary);
+        }
+        curY += 20.0f;
+
+        char subInfo[128];
+        snprintf(subInfo, sizeof(subInfo), "Tamanho: %s  •  Ultima leitura: %s", item.formattedSize.c_str(), item.lastReadFormatted.c_str());
+        vita2d_pgf_draw_text(pgf, infoX, curY, UITheme::TextSecondary, 0.80f, subInfo);
+    }
+
+    // 3. Barra de Ações Rápidas
+    auto drawActionBtn = [&](const UIRect& r, const char* label, bool isSelected, bool isPrimary = false) {
+        unsigned int bg = isPrimary ? UITheme::Primary : (isSelected ? UITheme::SurfaceActive : UITheme::Surface);
+        unsigned int fg = isPrimary ? UITheme::OnPrimary : (isSelected ? UITheme::Primary : UITheme::TextPrimary);
+        if (isSelected && !isPrimary) {
+            drawRoundedBox(r.x - 2.0f, r.y - 2.0f, r.w + 4.0f, r.h + 4.0f, 8.0f, UITheme::Primary);
+        }
+        drawRoundedBox(r.x, r.y, r.w, r.h, 6.0f, bg);
+        if (pgf) {
+            float tw = vita2d_pgf_text_width(pgf, 0.85f, label);
+            vita2d_pgf_draw_text(pgf, r.x + (r.w - tw) / 2.0f, r.y + 22.0f, fg, 0.85f, label);
+        }
+    };
+
+    const char* readLabel = (item.currentPage > 0) ? "Continuar" : "Ler";
+    drawActionBtn(layout.btnRead, readLabel, selectedActionBtn == 0, true);
+    drawActionBtn(layout.btnFavorite, item.isFavorite ? "Favoritado" : "Favoritar", selectedActionBtn == 1);
+    drawActionBtn(layout.btnMarkRead, (item.progressPercent >= 99.0f) ? "Lido" : "Marcar Lido", selectedActionBtn == 2);
+    drawActionBtn(layout.btnClearHistory, "Limpar Hist.", selectedActionBtn == 3);
+    drawActionBtn(layout.btnLink, "Vincular", selectedActionBtn == 4);
+    drawActionBtn(layout.btnDelete, "Excluir", selectedActionBtn == 5);
+
+    // 4. Seletor de Abas
+    auto drawTab = [&](const UIRect& r, const char* label, bool isActive) {
+        unsigned int bg = isActive ? UITheme::SurfaceActive : UITheme::Surface;
+        unsigned int fg = isActive ? UITheme::Primary : UITheme::TextSecondary;
+        drawRoundedBox(r.x, r.y, r.w, r.h, 6.0f, bg);
+        if (isActive) {
+            drawRoundedBox(r.x + 8.0f, r.y + r.h - 3.0f, r.w - 16.0f, 3.0f, 1.5f, UITheme::Primary);
+        }
+        if (pgf) {
+            float tw = vita2d_pgf_text_width(pgf, 0.90f, label);
+            vita2d_pgf_draw_text(pgf, r.x + (r.w - tw) / 2.0f, r.y + 22.0f, fg, 0.90f, label);
+        }
+    };
+
+    char chTabTitle[64];
+    snprintf(chTabTitle, sizeof(chTabTitle), "Capitulos (%d)", static_cast<int>(meta.chapters.size()));
+
+    drawTab(layout.tabInfo, "Informacoes", activeTab == 0);
+    drawTab(layout.tabChapters, chTabTitle, activeTab == 1);
+    drawTab(layout.tabLink, "Vinculo Bilingue", activeTab == 2);
+
+    // 5. Área de Conteúdo da Aba Ativa (com rolagem)
+    drawRoundedBox(layout.contentArea.x, layout.contentArea.y, layout.contentArea.w, layout.contentArea.h, 8.0f, UITheme::Surface);
+
+    float clipX = layout.contentArea.x + 14.0f;
+    float clipY = layout.contentArea.y + 14.0f;
+    float clipW = layout.contentArea.w - 28.0f;
+    float clipH = layout.contentArea.h - 28.0f;
+
+    if (activeTab == 0) {
+        // --- ABA 0: INFORMAÇÕES & SINOPSE & TAGS ---
+        float y = clipY - contentScrollY;
+
+        // Tags / Gêneros / Chips
+        if (!meta.genres.empty() || !meta.tags.empty()) {
+            std::vector<std::string> allChips = meta.genres;
+            allChips.insert(allChips.end(), meta.tags.begin(), meta.tags.end());
+
+            float chipX = clipX;
+            for (const auto& chip : allChips) {
+                if (chip.empty()) continue;
+                float chipTextW = vita2d_pgf_text_width(pgf, 0.78f, chip.c_str());
+                float chipW = chipTextW + 16.0f;
+                float chipH = 22.0f;
+                if (chipX + chipW > clipX + clipW) {
+                    chipX = clipX;
+                    y += 28.0f;
+                }
+                if (y + chipH >= clipY && y <= clipY + clipH) {
+                    drawRoundedBox(chipX, y, chipW, chipH, 11.0f, UITheme::SurfaceActive);
+                    vita2d_pgf_draw_text(pgf, chipX + 8.0f, y + 16.0f, UITheme::Secondary, 0.78f, chip.c_str());
+                }
+                chipX += chipW + 8.0f;
+            }
+            y += 34.0f;
+        }
+
+        // Sinopse
+        std::string syn = !meta.summary.empty() ? meta.summary : meta.notes;
+        if (!syn.empty() && pgf) {
+            if (y + 20.0f >= clipY && y <= clipY + clipH) {
+                vita2d_pgf_draw_text(pgf, clipX, y + 16.0f, UITheme::Primary, 0.95f, "Sinopse");
+            }
+            y += 24.0f;
+
+            // Quebra de linhas aproximada por largura
+            std::istringstream stream(syn);
+            std::string line;
+            while (std::getline(stream, line)) {
+                if (line.empty()) { y += 12.0f; continue; }
+                std::string word;
+                std::istringstream wordStream(line);
+                std::string curLine;
+                while (wordStream >> word) {
+                    std::string testLine = curLine.empty() ? word : (curLine + " " + word);
+                    float tw = vita2d_pgf_text_width(pgf, 0.82f, testLine.c_str());
+                    if (tw > clipW) {
+                        if (y + 18.0f >= clipY && y <= clipY + clipH) {
+                            vita2d_pgf_draw_text(pgf, clipX, y + 16.0f, UITheme::TextPrimary, 0.82f, curLine.c_str());
+                        }
+                        y += 20.0f;
+                        curLine = word;
+                    } else {
+                        curLine = testLine;
+                    }
+                }
+                if (!curLine.empty()) {
+                    if (y + 18.0f >= clipY && y <= clipY + clipH) {
+                        vita2d_pgf_draw_text(pgf, clipX, y + 16.0f, UITheme::TextPrimary, 0.82f, curLine.c_str());
+                    }
+                    y += 20.0f;
+                }
+            }
+            y += 14.0f;
+        }
+
+        // Ficha Técnica Completa
+        if (pgf) {
+            if (y + 20.0f >= clipY && y <= clipY + clipH) {
+                vita2d_pgf_draw_text(pgf, clipX, y + 16.0f, UITheme::Primary, 0.95f, "Ficha Tecnica");
+            }
+            y += 24.0f;
+
+            auto drawField = [&](const char* label, const std::string& val) {
+                if (val.empty()) return;
+                if (y + 18.0f >= clipY && y <= clipY + clipH) {
+                    vita2d_pgf_draw_text(pgf, clipX, y + 16.0f, UITheme::TextSecondary, 0.82f, label);
+                    vita2d_pgf_draw_text(pgf, clipX + 160.0f, y + 16.0f, UITheme::TextPrimary, 0.82f, val.c_str());
+                }
+                y += 20.0f;
+            };
+
+            drawField("Editora:", meta.publisher);
+            drawField("Selo / Imprint:", meta.imprint);
+            drawField("Data:", meta.releaseDate);
+            drawField("Idioma:", meta.language);
+            drawField("ISBN:", meta.isbn);
+            drawField("Classificacao:", meta.ageRating);
+            drawField("Direcao Manga:", meta.mangaDirection);
+            drawField("Arco de Historia:", meta.storyArc);
+            drawField("Grupo de Serie:", meta.seriesGroup);
+            drawField("Roteiro (Writer):", meta.writer);
+            drawField("Desenho (Penciller):", meta.penciller);
+            drawField("Arte-Final (Inker):", meta.inker);
+            drawField("Cores (Colorist):", meta.colorist);
+            drawField("Letras (Letterer):", meta.letterer);
+            drawField("Capa (Cover Artist):", meta.coverArtist);
+            drawField("Editor:", meta.editor);
+            drawField("Traducao:", meta.translator);
+            drawField("Caminho do Arquivo:", item.fullPath);
+        }
+    } else if (activeTab == 1) {
+        // --- ABA 1: CAPÍTULOS & MARCADORES ---
+        if (meta.chapters.empty()) {
+            if (pgf) {
+                vita2d_pgf_draw_text(pgf, clipX + 20.0f, clipY + 40.0f, UITheme::TextSecondary, 0.90f, "Nenhum capitulo ou marcador encontrado neste arquivo.");
+            }
+        } else {
+            float rowH = 34.0f;
+            for (size_t i = 0; i < meta.chapters.size(); ++i) {
+                const auto& ch = meta.chapters[i];
+                float rowY = clipY + i * rowH - contentScrollY;
+
+                if (rowY + rowH >= clipY && rowY <= clipY + clipH) {
+                    bool isSel = (selectedChapterIndex == static_cast<int>(i));
+                    bool isCurPage = (item.currentPage >= ch.pageIndex &&
+                                      (i + 1 >= meta.chapters.size() || item.currentPage < meta.chapters[i + 1].pageIndex));
+
+                    unsigned int rowBg = isSel ? UITheme::SurfaceActive : (isCurPage ? applyAlpha(UITheme::Primary, 0.15f) : UITheme::Surface);
+                    if (isSel) {
+                        drawRoundedBox(clipX - 2.0f, rowY - 1.0f, clipW + 4.0f, rowH - 2.0f, 6.0f, UITheme::Primary);
+                    }
+                    drawRoundedBox(clipX, rowY, clipW, rowH - 4.0f, 5.0f, rowBg);
+
+                    if (pgf) {
+                        char idxBuf[16];
+                        snprintf(idxBuf, sizeof(idxBuf), "%02d.", static_cast<int>(i + 1));
+                        vita2d_pgf_draw_text(pgf, clipX + 10.0f, rowY + 21.0f, UITheme::Secondary, 0.80f, idxBuf);
+
+                        float textStartX = clipX + 44.0f;
+                        if (ch.isBookmark) {
+                            drawRoundedBox(textStartX, rowY + 5.0f, 64.0f, 18.0f, 3.0f, UITheme::BadgeCBZ);
+                            vita2d_pgf_draw_text(pgf, textStartX + 4.0f, rowY + 18.0f, UITheme::OnPrimary, 0.65f, "Marcador");
+                            textStartX += 70.0f;
+                        }
+
+                        std::string chTitle = ch.title;
+                        if (chTitle.size() > 44) chTitle = chTitle.substr(0, 41) + "...";
+                        vita2d_pgf_draw_text(pgf, textStartX, rowY + 21.0f, isSel ? UITheme::Primary : UITheme::TextPrimary, 0.85f, chTitle.c_str());
+
+                        char pBuf[32];
+                        snprintf(pBuf, sizeof(pBuf), "Pag. %d", ch.pageIndex + 1);
+                        float pw = vita2d_pgf_text_width(pgf, 0.78f, pBuf);
+                        vita2d_pgf_draw_text(pgf, clipX + clipW - pw - 14.0f, rowY + 21.0f, UITheme::TextSecondary, 0.78f, pBuf);
+                    }
+                }
+            }
+        }
+    } else if (activeTab == 2) {
+        // --- ABA 2: VÍNCULO BILÍNGUE ---
+        float y = clipY + 20.0f - contentScrollY;
+        if (pgf) {
+            vita2d_pgf_draw_text(pgf, clipX, y, UITheme::Primary, 1.0f, "Status do Vinculo Bilingue (PagesLink)");
+            y += 28.0f;
+
+            if (meta.hasLinkedFile) {
+                vita2d_pgf_draw_text(pgf, clipX, y, UITheme::BadgeTXT, 0.90f, "[ Vinculado ]");
+                y += 24.0f;
+                vita2d_pgf_draw_text(pgf, clipX, y, UITheme::TextSecondary, 0.85f, "Arquivo Secundario:");
+                vita2d_pgf_draw_text(pgf, clipX + 160.0f, y, UITheme::TextPrimary, 0.85f, meta.linkedFileName.c_str());
+                y += 24.0f;
+                char pBuf[64];
+                snprintf(pBuf, sizeof(pBuf), "%d paginas", meta.linkedPageCount);
+                vita2d_pgf_draw_text(pgf, clipX, y, UITheme::TextSecondary, 0.85f, "Total de Paginas:");
+                vita2d_pgf_draw_text(pgf, clipX + 160.0f, y, UITheme::TextPrimary, 0.85f, pBuf);
+                y += 30.0f;
+                vita2d_pgf_draw_text(pgf, clipX, y, UITheme::TextSecondary, 0.82f, "Voce pode alternar entre as versoes durante a leitura usando Quadrado ou Triangulo.");
+            } else {
+                vita2d_pgf_draw_text(pgf, clipX, y, UITheme::TextSecondary, 0.90f, "Nenhum arquivo secundario vinculado atualmente.");
+                y += 26.0f;
+                vita2d_pgf_draw_text(pgf, clipX, y, UITheme::TextSecondary, 0.82f, "Clique no botao 'Vincular' acima para associar uma versao em outro idioma e ler simultaneamente.");
+            }
+        }
+    }
+
+    // 6. Modal de Zoom da Capa em Tela Cheia (se ativo)
+    if (isCoverModalOpen && coverTex) {
+        vita2d_draw_rectangle(0, 0, sW, sH, applyAlpha(UITheme::Background, 0.94f));
+        float tw = (float)vita2d_texture_get_width(coverTex);
+        float th = (float)vita2d_texture_get_height(coverTex);
+        if (tw > 0 && th > 0) {
+            float maxW = sW - 40.0f;
+            float maxH = sH - 50.0f;
+            float scale = std::min(maxW / tw, maxH / th);
+            float rw = tw * scale;
+            float rh = th * scale;
+            float rx = (sW - rw) / 2.0f;
+            float ry = (sH - rh) / 2.0f - 10.0f;
+            drawRoundedBox(rx - 4.0f, ry - 4.0f, rw + 8.0f, rh + 8.0f, 10.0f, UITheme::Primary);
+            vita2d_draw_texture_scale(coverTex, rx, ry, scale, scale);
+        }
+        if (pgf) {
+            const char* tip = "Toque ou pressione Circulo / Triangulo para fechar a visualizacao da capa";
+            float tw = vita2d_pgf_text_width(pgf, 0.80f, tip);
+            vita2d_pgf_draw_text(pgf, (sW - tw) / 2.0f, sH - 16.0f, UITheme::TextSecondary, 0.80f, tip);
+        }
+    }
+
+    // 7. Rodapé com Instruções de Controle
+    const char* footerHint = isCoverModalOpen
+        ? "O/TRI: Fechar Capa"
+        : "D-Pad/L/R: Navegar | X: Confirmar | TRI: Ver Capa | O: Voltar";
+    drawFooter(footerHint, false);
 }
 
 void UIComponents::drawPagesLinkScrollBar(float x, float y, float w, float h, float scrollPos, float totalRange) {

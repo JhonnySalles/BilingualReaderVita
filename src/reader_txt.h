@@ -14,6 +14,7 @@ public:
     void update(float dt);
     void nextPage();
     void prevPage();
+    void goToPage(int pageIndex);
     void close();
 
     void setRotated(bool rotated, vita2d_pgf* font);

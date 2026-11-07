@@ -2,6 +2,7 @@
 #include <vita2d.h>
 #include <string>
 #include "file_browser.h"
+#include "extractors/detail_metadata.h"
 
 struct UIRect {
     float x = 0.0f;
@@ -80,6 +81,21 @@ struct UISettingsLayout {
     }
 };
 
+struct UIDetailLayout {
+    UIRect backBtn;
+    UIRect coverCard;
+    UIRect btnRead;
+    UIRect btnFavorite;
+    UIRect btnMarkRead;
+    UIRect btnClearHistory;
+    UIRect btnLink;
+    UIRect btnDelete;
+    UIRect tabInfo;
+    UIRect tabChapters;
+    UIRect tabLink;
+    UIRect contentArea;
+};
+
 namespace UITheme {
     // Cores do Tema ativo (atualizadas via ThemeManager::apply)
     extern unsigned int Background;
@@ -135,6 +151,7 @@ public:
     static UIReaderChromeLayout getReaderChromeLayout();
     static UIConfirmDialogLayout getConfirmDialogLayout();
     static UISettingsLayout getSettingsLayout(float scrollY = 0.0f);
+    static UIDetailLayout getDetailLayout(bool isRotated = false);
 
     static void drawRoundedBox(float x, float y, float w, float h, float radius, unsigned int color);
     
@@ -153,6 +170,19 @@ public:
 
     // Tela de Configurações (Estilo PS Vita Nativo) com rolagem vertical e horizontal nos temas
     static void drawSettingsScreen(int selectedItemIndex, const struct AppConfig& config, float scrollY = 0.0f, float themeScrollX = 0.0f, int themeCursor = 0);
+
+    // Tela de Detalhes Moderna (Book e Manga Detail)
+    static void drawDetailScreen(
+        const LibraryItem& item,
+        const DetailMetadata& meta,
+        vita2d_texture* coverTex,
+        int activeTab,              // 0: Info, 1: Capítulos, 2: Vínculo
+        int selectedActionBtn,      // 0: Read, 1: Fav, 2: MarkRead, 3: ClearHist, 4: Link, 5: Del, -1: nenhum
+        int selectedChapterIndex,   // -1 se não estiver navegando nos capítulos
+        float contentScrollY,
+        bool isCoverModalOpen,
+        bool isRotated = false
+    );
 
     // Utilitário para cálculo de transparência (Alpha Blending)
     static inline unsigned int applyAlpha(unsigned int color, float alpha) {

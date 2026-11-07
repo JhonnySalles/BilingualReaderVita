@@ -18,7 +18,8 @@ public:
     bool extractMetadata(const std::string& path, BookMetadata& outMeta) override;
     bool extractCover(const std::string& path, std::vector<uint8_t>& outCoverBytes) override;
     std::string extractContent(const std::string& path, const std::string& outputDir) override;
+
+    static std::string stripHtmlTagsAndEntities(const std::string& input);
 };
 
 } // namespace Extractor
-

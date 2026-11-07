@@ -4,8 +4,11 @@
 #include "../file_utils.h"
 #include <algorithm>
 #include <cstring>
+#include <strings.h>
 #include <cstdio>
+#include <cctype>
 #include <set>
+#include <map>
 
 namespace Extractor {
 
@@ -25,9 +28,9 @@ static fz_xml* findChildTag(fz_xml* node, const char* tagName) {
     for (fz_xml* child = fz_xml_down(node); child; child = fz_xml_next(child)) {
         char* tag = fz_xml_tag(child);
         if (tag) {
-            if (strcmp(tag, tagName) == 0) return child;
+            if (strcasecmp(tag, tagName) == 0) return child;
             const char* colon = strchr(tag, ':');
-            if (colon && strcmp(colon + 1, tagName) == 0) return child;
+            if (colon && strcasecmp(colon + 1, tagName) == 0) return child;
         }
         fz_xml* sub = findChildTag(child, tagName);
         if (sub) return sub;
@@ -40,11 +43,11 @@ static void collectAllTags(fz_xml* node, const char* tagName, std::vector<fz_xml
     for (fz_xml* child = fz_xml_down(node); child; child = fz_xml_next(child)) {
         char* tag = fz_xml_tag(child);
         if (tag) {
-            if (strcmp(tag, tagName) == 0) {
+            if (strcasecmp(tag, tagName) == 0) {
                 outList.push_back(child);
             } else {
                 const char* colon = strchr(tag, ':');
-                if (colon && strcmp(colon + 1, tagName) == 0) {
+                if (colon && strcasecmp(colon + 1, tagName) == 0) {
                     outList.push_back(child);
                 }
             }
@@ -96,6 +99,117 @@ static std::string findOpfPath(ArchiveHelper& archive) {
     return "";
 }
 
+std::string EpubExtractor::stripHtmlTagsAndEntities(const std::string& input) {
+    std::string result;
+    result.reserve(input.size());
+
+    bool inTag = false;
+    std::string curTag;
+
+    for (size_t i = 0; i < input.size(); ++i) {
+        char c = input[i];
+        if (c == '<') {
+            inTag = true;
+            curTag.clear();
+        } else if (c == '>') {
+            inTag = false;
+            std::string tagLower = curTag;
+            std::transform(tagLower.begin(), tagLower.end(), tagLower.begin(), ::tolower);
+            if (tagLower == "p" || tagLower == "/p" || tagLower == "br" || tagLower == "br/" ||
+                tagLower == "div" || tagLower == "/div") {
+                if (result.empty() || result.back() != '\n') {
+                    result += '\n';
+                }
+            }
+        } else if (inTag) {
+            if (curTag.size() < 16) curTag += c;
+        } else if (c == '&') {
+            size_t semi = input.find(';', i);
+            if (semi != std::string::npos && (semi - i) <= 10) {
+                std::string ent = input.substr(i + 1, semi - i - 1);
+                if (ent == "nbsp") result += ' ';
+                else if (ent == "amp") result += '&';
+                else if (ent == "lt") result += '<';
+                else if (ent == "gt") result += '>';
+                else if (ent == "quot") result += '"';
+                else if (ent == "apos") result += '\'';
+                else result += ' ';
+                i = semi;
+            } else {
+                result += c;
+            }
+        } else {
+            result += c;
+        }
+    }
+
+    // Limpeza de quebras de linha múltiplas e espaços excessivos
+    std::string clean;
+    clean.reserve(result.size());
+    int consecutiveNewlines = 0;
+    for (char c : result) {
+        if (c == '\r') continue;
+        if (c == '\n') {
+            consecutiveNewlines++;
+            if (consecutiveNewlines <= 2) clean += c;
+        } else {
+            consecutiveNewlines = 0;
+            clean += c;
+        }
+    }
+
+    // Trim inicial e final
+    size_t first = clean.find_first_not_of(" \t\n\r");
+    if (first == std::string::npos) return "";
+    size_t last = clean.find_last_not_of(" \t\n\r");
+    return clean.substr(first, last - first + 1);
+}
+
+static void extractChaptersFromNcx(ArchiveHelper& archive, const std::string& ncxPath, const std::map<std::string, int>& hrefToPage, std::vector<ChapterItem>& outChapters) {
+    std::vector<uint8_t> ncxBytes;
+    if (!archive.readEntry(ncxPath, ncxBytes)) return;
+
+    fz_xml* root = archive.parseXmlBuffer(ncxBytes.data(), ncxBytes.size());
+    if (!root) return;
+
+    std::vector<fz_xml*> navPoints;
+    collectAllTags(root, "navPoint", navPoints);
+
+    for (fz_xml* np : navPoints) {
+        fz_xml* navLabel = findChildTag(np, "navLabel");
+        std::string title;
+        if (navLabel) {
+            fz_xml* textNode = findChildTag(navLabel, "text");
+            if (textNode) title = getNodeTextRecursive(textNode);
+        }
+        fz_xml* contentNode = findChildTag(np, "content");
+        std::string src;
+        if (contentNode) {
+            char* s = fz_xml_att(contentNode, "src");
+            if (s) src = s;
+        }
+
+        if (!title.empty()) {
+            size_t hash = src.find('#');
+            std::string srcClean = (hash != std::string::npos) ? src.substr(0, hash) : src;
+            size_t slash = srcClean.find_last_of('/');
+            if (slash != std::string::npos) srcClean = srcClean.substr(slash + 1);
+
+            int page = 0;
+            auto it = hrefToPage.find(srcClean);
+            if (it != hrefToPage.end()) {
+                page = it->second;
+            }
+
+            ChapterItem ch;
+            ch.title = title;
+            ch.pageIndex = page;
+            ch.isBookmark = false;
+            outChapters.push_back(ch);
+        }
+    }
+}
+
 bool EpubExtractor::extractMetadata(const std::string& path, BookMetadata& outMeta) {
     ArchiveHelper archive;
     if (!archive.open(path)) return false;
@@ -116,20 +230,136 @@ bool EpubExtractor::extractMetadata(const std::string& path, BookMetadata& outMe
         fz_xml* titleNode = findChildTag(metadataNode, "title");
         if (titleNode) outMeta.title = getNodeTextRecursive(titleNode);
 
-        fz_xml* creatorNode = findChildTag(metadataNode, "creator");
-        if (creatorNode) outMeta.author = getNodeTextRecursive(creatorNode);
+        // Múltiplos Autores
+        std::vector<fz_xml*> creators;
+        collectAllTags(metadataNode, "creator", creators);
+        std::string authorsJoined;
+        for (size_t i = 0; i < creators.size(); ++i) {
+            std::string a = getNodeTextRecursive(creators[i]);
+            if (!a.empty()) {
+                if (!authorsJoined.empty()) authorsJoined += ", ";
+                authorsJoined += a;
+            }
+        }
+        outMeta.author = authorsJoined;
 
         fz_xml* descNode = findChildTag(metadataNode, "description");
-        if (descNode) outMeta.annotation = getNodeTextRecursive(descNode);
+        if (descNode) {
+            std::string rawDesc = getNodeTextRecursive(descNode);
+            outMeta.annotation = stripHtmlTagsAndEntities(rawDesc);
+        }
 
         fz_xml* pubNode = findChildTag(metadataNode, "publisher");
         if (pubNode) outMeta.publisher = getNodeTextRecursive(pubNode);
 
         fz_xml* dateNode = findChildTag(metadataNode, "date");
-        if (dateNode) outMeta.releaseDate = getNodeTextRecursive(dateNode);
+        if (dateNode) {
+            std::string d = getNodeTextRecursive(dateNode);
+            if (d.size() >= 10 && d[4] == '-' && d[7] == '-') {
+                // Formato YYYY-MM-DD para DD/MM/YYYY
+                char buf[32];
+                snprintf(buf, sizeof(buf), "%s/%s/%s", d.substr(8, 2).c_str(), d.substr(5, 2).c_str(), d.substr(0, 4).c_str());
+                outMeta.releaseDate = buf;
+            } else {
+                outMeta.releaseDate = d;
+            }
+        }
 
-        fz_xml* subjNode = findChildTag(metadataNode, "subject");
-        if (subjNode) outMeta.genre = getNodeTextRecursive(subjNode);
+        fz_xml* langNode = findChildTag(metadataNode, "language");
+        if (langNode) outMeta.language = getNodeTextRecursive(langNode);
+
+        // Múltiplos Assuntos/Gêneros
+        std::vector<fz_xml*> subjects;
+        collectAllTags(metadataNode, "subject", subjects);
+        std::string genresJoined;
+        for (size_t i = 0; i < subjects.size(); ++i) {
+            std::string s = getNodeTextRecursive(subjects[i]);
+            if (!s.empty()) {
+                outMeta.subjects.push_back(s);
+                if (!genresJoined.empty()) genresJoined += ", ";
+                genresJoined += s;
+            }
+        }
+        outMeta.genre = genresJoined;
+
+        // Identificadores (ISBN)
+        std::vector<fz_xml*> identifiers;
+        collectAllTags(metadataNode, "identifier", identifiers);
+        for (fz_xml* idNode : identifiers) {
+            std::string idText = getNodeTextRecursive(idNode);
+            char* scheme = fz_xml_att(idNode, "scheme");
+            char* idAttr = fz_xml_att(idNode, "id");
+            if ((scheme && strcasecmp(scheme, "isbn") == 0) ||
+                (idAttr && strstr(idAttr, "isbn") != nullptr) ||
+                idText.find("978-") != std::string::npos || idText.find("979-") != std::string::npos) {
+                outMeta.isbn = idText;
+                break;
+            }
+        }
+
+        // Série e Volume (Calibre meta e EPUB 3 meta)
+        std::vector<fz_xml*> metas;
+        collectAllTags(metadataNode, "meta", metas);
+        for (fz_xml* m : metas) {
+            char* name = fz_xml_att(m, "name");
+            char* content = fz_xml_att(m, "content");
+            char* prop = fz_xml_att(m, "property");
+
+            if (name && content) {
+                if (strcmp(name, "calibre:series") == 0) {
+                    outMeta.series = content;
+                } else if (strcmp(name, "calibre:series_index") == 0) {
+                    try { outMeta.seriesIndex = static_cast<int>(std::stof(content)); } catch (...) {}
+                }
+            }
+
+            if (prop) {
+                if (strcmp(prop, "belongs-to-collection") == 0) {
+                    outMeta.series = getNodeTextRecursive(m);
+                } else if (strcmp(prop, "group-position") == 0) {
+                    std::string pos = getNodeTextRecursive(m);
+                    try { outMeta.seriesIndex = std::stoi(pos); } catch (...) {}
+                }
+            }
+        }
+    }
+
+    // Mapeamento do Spine para índices de página dos capítulos
+    std::map<std::string, std::string> idToHref;
+    std::string ncxHref;
+    std::vector<fz_xml*> items;
+    collectAllTags(root, "item", items);
+    for (fz_xml* it : items) {
+        char* id = fz_xml_att(it, "id");
+        char* href = fz_xml_att(it, "href");
+        char* media = fz_xml_att(it, "media-type");
+        if (id && href) {
+            idToHref[id] = href;
+        }
+        if (media && strcmp(media, "application/x-dtbncx+xml") == 0 && href) {
+            ncxHref = href;
+        }
+    }
+
+    std::map<std::string, int> hrefToPage;
+    std::vector<fz_xml*> itemrefs;
+    collectAllTags(root, "itemref", itemrefs);
+    for (size_t i = 0; i < itemrefs.size(); ++i) {
+        char* idref = fz_xml_att(itemrefs[i], "idref");
+        if (idref) {
+            auto it = idToHref.find(idref);
+            if (it != idToHref.end()) {
+                std::string href = it->second;
+                size_t slash = href.find_last_of('/');
+                if (slash != std::string::npos) href = href.substr(slash + 1);
+                hrefToPage[href] = static_cast<int>(i);
+            }
+        }
+    }
+
+    if (!ncxHref.empty()) {
+        std::string fullNcxPath = resolveRelativePath(opfPath, ncxHref);
+        extractChaptersFromNcx(archive, fullNcxPath, hrefToPage, outMeta.chapters);
     }
 
     if (outMeta.title.empty()) {
@@ -292,7 +522,6 @@ std::string EpubExtractor::extractContent(const std::string& path, const std::st
         return path; // Sem imagem de capa para injetar
     }
 
-    // Injeta a capa gerando uma cópia compactada em book.epub
     std::string targetEpub = outputDir + "/book.epub";
     ZipWriter writer;
     if (!writer.open(targetEpub)) {
@@ -308,7 +537,6 @@ std::string EpubExtractor::extractContent(const std::string& path, const std::st
     const std::string coverImgName = "bilingual-cover-image.jpg";
     const std::string coverPageName = "bilingual-cover-page.xhtml";
 
-    // Modificar o OPF para incluir o item da capa e o spine
     std::string modifiedOpf = opfContent;
     size_t manifestPos = modifiedOpf.find("<manifest>");
     if (manifestPos != std::string::npos) {
@@ -328,7 +556,6 @@ std::string EpubExtractor::extractContent(const std::string& path, const std::st
         }
     }
 
-    // Copiar todas as entradas do ZIP original, exceto o OPF que será substituído
     int entryCount = archive.countEntries();
     for (int i = 0; i < entryCount; ++i) {
         std::string entryName = archive.getEntryName(i);
@@ -342,10 +569,8 @@ std::string EpubExtractor::extractContent(const std::string& path, const std::st
         }
     }
 
-    // Adicionar a imagem da capa injetada
     writer.addEntry(parentDir + coverImgName, coverBytes.data(), coverBytes.size());
 
-    // Adicionar a página XHTML da capa
     std::string xhtml =
         "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
         "<!DOCTYPE html>\n"
@@ -370,4 +595,3 @@ std::string EpubExtractor::extractContent(const std::string& path, const std::st
 }
 
 } // namespace Extractor
-

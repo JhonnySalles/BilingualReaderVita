@@ -21,6 +21,8 @@
 #include "managers/cover_manager.h"
 #include "cache_manager.h"
 #include "extractors/book_extractor_manager.h"
+#include "extractors/comicinfo_parser.h"
+#include "extractors/detail_metadata.h"
 
 // Matriz ortográfica interna do vita2d (sem setter público).
 extern "C" float _vita2d_ortho_matrix[4 * 4];
@@ -84,7 +86,8 @@ enum class AppState {
     READ_CBZ,
     READ_EPUB,
     PAGES_LINK,
-    PAGES_LINK_FILE_PICKER
+    PAGES_LINK_FILE_PICKER,
+    DETAIL
 };
 
 enum class PagesLinkFocusArea {
@@ -430,6 +433,65 @@ int main(int argc, char* argv[]) {
     int plPickerScrollOffset = 0;
     float plPickerSmoothScrollOffset = 0.0f;
     std::vector<LibraryItem> plPickerItems;
+
+    // Estado da Tela de Detalhes
+    DetailMetadata detailMeta;
+    int detailItemIndex = -1;
+    int detailActiveTab = 0;          // 0: Info, 1: Capítulos, 2: Vínculo
+    int detailSelectedActionBtn = 0;  // 0: Read, 1: Fav, 2: MarkRead, 3: ClearHist, 4: Link, 5: Del
+    int detailSelectedChapterIdx = -1;
+    float detailContentScrollY = 0.0f;
+    bool detailCoverModalOpen = false;
+
+    // Timer para detecção de clique longo (long touch / long press)
+    int menuTouchHoldTimer = 0;
+    int crossHoldTimer = 0;
+
+    auto openDetailScreen = [&](int idx) {
+        if (idx < 0 || idx >= static_cast<int>(visibleItems.size())) return;
+        detailItemIndex = idx;
+        const auto& item = visibleItems[idx];
+
+        detailMeta = DetailMetadata();
+        detailMeta.title = item.filename;
+
+        if (FileBrowser::isMangaType(item.type)) {
+            Extractor::ComicInfoParser::parse(item.fullPath, detailMeta);
+        } else if (FileBrowser::isBookType(item.type)) {
+            BookMetadata bMeta;
+            if (Extractor::BookExtractorManager::instance().extractMetadata(item.fullPath, bMeta)) {
+                detailMeta.isLoaded = true;
+                detailMeta.isManga = false;
+                detailMeta.title = !bMeta.title.empty() ? bMeta.title : item.filename;
+                detailMeta.authors = bMeta.author;
+                detailMeta.publisher = bMeta.publisher;
+                detailMeta.genre = bMeta.genre;
+                detailMeta.language = bMeta.language;
+                detailMeta.releaseDate = bMeta.releaseDate;
+                detailMeta.summary = bMeta.annotation;
+                detailMeta.series = bMeta.series;
+                detailMeta.volume = bMeta.seriesIndex;
+                detailMeta.isbn = bMeta.isbn;
+                detailMeta.genres = bMeta.subjects;
+                detailMeta.chapters = bMeta.chapters;
+            }
+        }
+
+        // Verifica vínculo no PagesLinkManager
+        if (PagesLinkManager::hasSavedLinkForFile(item.fullPath)) {
+            detailMeta.hasLinkedFile = true;
+            detailMeta.linkedFilePath = PagesLinkManager::getLinkFilePath(item.fullPath);
+            size_t slash = detailMeta.linkedFilePath.find_last_of("/\\");
+            detailMeta.linkedFileName = (slash != std::string::npos) ? detailMeta.linkedFilePath.substr(slash + 1) : detailMeta.linkedFilePath;
+        }
+
+        detailActiveTab = 0;
+        detailSelectedActionBtn = 0;
+        detailSelectedChapterIdx = -1;
+        detailContentScrollY = 0.0f;
+        detailCoverModalOpen = false;
+        currentState = AppState::DETAIL;
+    };
 
     auto openPagesLink = [&](int idx) {
         if (idx >= 0 && idx < static_cast<int>(visibleItems.size())) {
@@ -865,6 +927,7 @@ int main(int argc, char* argv[]) {
 
                     // Identifica se tocou em algum item
                     if (!visibleItems.empty() && touchStartY >= 70) {
+                        menuTouchHoldTimer = 0;
                         if (!isGridView) {
                             float startY = 86.0f;
                             float cardHeight = 64.0f;
@@ -925,6 +988,16 @@ int main(int argc, char* argv[]) {
                     // Arraste Horizontal: Deleção do item
                     else if (!isDraggingY && initialTouchItemIndex >= 0 && std::abs(deltaX) > 28 && std::abs(deltaX) > std::abs(deltaY) * 1.3f) {
                         isDraggingX = true;
+                    }
+                    // Detecção de Toque Longo (Long Touch) no Card (~430ms sem arrastar)
+                    else if (!isDraggingX && !isDraggingY && initialTouchItemIndex >= 0) {
+                        menuTouchHoldTimer++;
+                        if (menuTouchHoldTimer >= 26) { // ~430ms a 60fps
+                            openDetailScreen(initialTouchItemIndex);
+                            isTouching = false;
+                            initialTouchItemIndex = -1;
+                            menuTouchHoldTimer = 0;
+                        }
                     }
                 } else if (touchUp && isTouching) {
                     if (isDraggingX && initialTouchItemIndex >= 0 && initialTouchItemIndex < static_cast<int>(visibleItems.size())) {
@@ -1072,9 +1145,23 @@ int main(int argc, char* argv[]) {
                         openPagesLink(selectedIndex);
                     }
 
-                    // Abrir Arquivo com Cruz
-                    if ((pressed & SCE_CTRL_CROSS) && !visibleItems.empty()) {
-                        openItem(selectedIndex);
+                    // Detalhes do Livro/Mangá com SELECT
+                    if ((pressed & SCE_CTRL_SELECT) && !visibleItems.empty()) {
+                        openDetailScreen(selectedIndex);
+                    }
+
+                    // Abrir Arquivo com Cruz (ou segurar para Detalhes)
+                    if (logicalButtons & SCE_CTRL_CROSS) {
+                        crossHoldTimer++;
+                        if (crossHoldTimer >= 26 && !visibleItems.empty()) {
+                            openDetailScreen(selectedIndex);
+                            crossHoldTimer = 0;
+                        }
+                    } else {
+                        if (crossHoldTimer > 0 && crossHoldTimer < 26 && !visibleItems.empty()) {
+                            openItem(selectedIndex);
+                        }
+                        crossHoldTimer = 0;
                     }
                 } else if (currentFocus == FocusArea::SEARCH) {
                     if (pressed & SCE_CTRL_DOWN) currentFocus = FocusArea::CONTENT;
@@ -1286,7 +1373,7 @@ int main(int argc, char* argv[]) {
             );
 
             // Barra Inferior / Rodapé desenhado por cima do conteúdo (Z-Order Top)
-            UIComponents::drawFooter("D-Pad: Navegar | X: Abrir/Acao | []: Favorito | /\\: Recarregar");
+            UIComponents::drawFooter("D-Pad: Navegar | X: Ler (Segure/SEL: Detalhes) | []: Favorito | /\\: Recarregar");
 
             // Barra de rolagem animada com fade
             if (!visibleItems.empty()) {
@@ -2471,6 +2558,277 @@ int main(int argc, char* argv[]) {
             UIComponents::drawFooter("D-Pad / Toque: Selecionar Arquivo | X: Confirmar | O: Cancelar");
 
             endDrawing();
+        } else if (currentState == AppState::DETAIL) {
+            UIDetailLayout layout = UIComponents::getDetailLayout(readerRotated);
+
+            if (detailItemIndex >= 0 && detailItemIndex < static_cast<int>(visibleItems.size())) {
+                auto& curItem = visibleItems[detailItemIndex];
+
+                // --- ENTRADA DE TOQUE (TOUCH) NA TELA DE DETALHES ---
+                if (touchDown) {
+                    float tx = static_cast<float>(touchX);
+                    float ty = static_cast<float>(touchY);
+
+                    if (detailCoverModalOpen) {
+                        detailCoverModalOpen = false;
+                    } else if (layout.backBtn.contains(tx, ty)) {
+                        currentState = AppState::MENU;
+                    } else if (layout.coverCard.contains(tx, ty)) {
+                        detailCoverModalOpen = true;
+                    } else if (layout.btnRead.contains(tx, ty)) {
+                        openItem(detailItemIndex);
+                    } else if (layout.btnFavorite.contains(tx, ty)) {
+                        FileBrowser::toggleFavorite(curItem);
+                        for (auto& orig : allItems) {
+                            if (orig.filename == curItem.filename) {
+                                orig.isFavorite = curItem.isFavorite;
+                                break;
+                            }
+                        }
+                        FileBrowser::saveMetadata(allItems);
+                    } else if (layout.btnMarkRead.contains(tx, ty)) {
+                        if (curItem.progressPercent >= 99.0f) {
+                            curItem.currentPage = 0;
+                            curItem.progressPercent = 0.0f;
+                        } else {
+                            int totP = (curItem.totalPages > 0) ? curItem.totalPages : (detailMeta.count > 0 ? detailMeta.count : 1);
+                            curItem.currentPage = totP - 1;
+                            curItem.progressPercent = 100.0f;
+                        }
+                        for (auto& orig : allItems) {
+                            if (orig.filename == curItem.filename) {
+                                orig.currentPage = curItem.currentPage;
+                                orig.progressPercent = curItem.progressPercent;
+                                break;
+                            }
+                        }
+                        FileBrowser::saveMetadata(allItems);
+                    } else if (layout.btnClearHistory.contains(tx, ty)) {
+                        curItem.currentPage = 0;
+                        curItem.progressPercent = 0.0f;
+                        curItem.lastReadTime = 0;
+                        curItem.lastReadFormatted = "--/--/----";
+                        for (auto& orig : allItems) {
+                            if (orig.filename == curItem.filename) {
+                                orig.currentPage = 0;
+                                orig.progressPercent = 0.0f;
+                                orig.lastReadTime = 0;
+                                orig.lastReadFormatted = "--/--/----";
+                                break;
+                            }
+                        }
+                        FileBrowser::saveMetadata(allItems);
+                    } else if (layout.btnLink.contains(tx, ty)) {
+                        openPagesLink(detailItemIndex);
+                    } else if (layout.btnDelete.contains(tx, ty)) {
+                        itemToDeleteIndex = detailItemIndex;
+                        showDeleteConfirm = true;
+                        deleteConfirmYesSelected = false;
+                        currentState = AppState::MENU;
+                    } else if (layout.tabInfo.contains(tx, ty)) {
+                        detailActiveTab = 0;
+                        detailContentScrollY = 0.0f;
+                        detailSelectedChapterIdx = -1;
+                    } else if (layout.tabChapters.contains(tx, ty)) {
+                        detailActiveTab = 1;
+                        detailContentScrollY = 0.0f;
+                        detailSelectedChapterIdx = !detailMeta.chapters.empty() ? 0 : -1;
+                    } else if (layout.tabLink.contains(tx, ty)) {
+                        detailActiveTab = 2;
+                        detailContentScrollY = 0.0f;
+                        detailSelectedChapterIdx = -1;
+                    } else if (detailActiveTab == 1 && layout.contentArea.contains(tx, ty)) {
+                        float clipY = layout.contentArea.y + 14.0f;
+                        float relY = ty - clipY + detailContentScrollY;
+                        float rowH = 34.0f;
+                        int tappedIdx = static_cast<int>(relY / rowH);
+                        if (tappedIdx >= 0 && tappedIdx < static_cast<int>(detailMeta.chapters.size())) {
+                            int targetPage = detailMeta.chapters[tappedIdx].pageIndex;
+                            curItem.currentPage = targetPage;
+                            openItem(detailItemIndex);
+                            if (currentState == AppState::READ_CBZ) {
+                                readerCbz.goToPage(targetPage);
+                            } else if (currentState == AppState::READ_EPUB) {
+                                readerEpub.goToPage(targetPage);
+                            } else if (currentState == AppState::READ_TXT) {
+                                readerTxt.goToPage(targetPage);
+                            }
+                        }
+                    }
+                }
+
+                // Arraste / Rolagem de Conteúdo por Touch
+                if (touchHeld && isTouching && !detailCoverModalOpen) {
+                    int deltaY = touchY - touchStartY;
+                    if (std::abs(deltaY) > 8) {
+                        detailContentScrollY -= static_cast<float>(deltaY) * 0.45f;
+                        if (detailContentScrollY < 0.0f) detailContentScrollY = 0.0f;
+                        touchStartY = touchY;
+                    }
+                }
+
+                // --- CONTROLE POR BOTÕES / D-PAD ---
+                if (detailCoverModalOpen) {
+                    if (pressed & (SCE_CTRL_CIRCLE | SCE_CTRL_TRIANGLE | SCE_CTRL_CROSS)) {
+                        detailCoverModalOpen = false;
+                    }
+                } else {
+                    if (pressed & SCE_CTRL_CIRCLE) {
+                        currentState = AppState::MENU;
+                    }
+                    if (pressed & SCE_CTRL_TRIANGLE) {
+                        detailCoverModalOpen = true;
+                    }
+
+                    // Alternar abas com L e R
+                    if (pressed & SCE_CTRL_LTRIGGER) {
+                        detailActiveTab = (detailActiveTab + 2) % 3;
+                        detailContentScrollY = 0.0f;
+                        detailSelectedChapterIdx = (detailActiveTab == 1 && !detailMeta.chapters.empty()) ? 0 : -1;
+                    }
+                    if (pressed & SCE_CTRL_RTRIGGER) {
+                        detailActiveTab = (detailActiveTab + 1) % 3;
+                        detailContentScrollY = 0.0f;
+                        detailSelectedChapterIdx = (detailActiveTab == 1 && !detailMeta.chapters.empty()) ? 0 : -1;
+                    }
+
+                    // Navegação nos botões de ação e capítulos
+                    if (detailActiveTab == 1 && detailSelectedChapterIdx >= 0 && !detailMeta.chapters.empty()) {
+                        if (pressed & SCE_CTRL_UP) {
+                            if (detailSelectedChapterIdx > 0) {
+                                detailSelectedChapterIdx--;
+                                float targetY = detailSelectedChapterIdx * 34.0f;
+                                if (targetY < detailContentScrollY) detailContentScrollY = targetY;
+                            } else {
+                                detailSelectedChapterIdx = -1; // Volta o foco para os botões de ação
+                            }
+                        }
+                        if (pressed & SCE_CTRL_DOWN) {
+                            if (detailSelectedChapterIdx < static_cast<int>(detailMeta.chapters.size()) - 1) {
+                                detailSelectedChapterIdx++;
+                                float targetY = (detailSelectedChapterIdx + 1) * 34.0f;
+                                if (targetY > detailContentScrollY + layout.contentArea.h - 50.0f) {
+                                    detailContentScrollY = targetY - (layout.contentArea.h - 50.0f);
+                                }
+                            }
+                        }
+                        if (pressed & SCE_CTRL_CROSS) {
+                            int targetPage = detailMeta.chapters[detailSelectedChapterIdx].pageIndex;
+                            curItem.currentPage = targetPage;
+                            openItem(detailItemIndex);
+                            if (currentState == AppState::READ_CBZ) {
+                                readerCbz.goToPage(targetPage);
+                            } else if (currentState == AppState::READ_EPUB) {
+                                readerEpub.goToPage(targetPage);
+                            } else if (currentState == AppState::READ_TXT) {
+                                readerTxt.goToPage(targetPage);
+                            }
+                        }
+                    } else {
+                        // Foco nos botões de ação superiores
+                        if (pressed & SCE_CTRL_LEFT) {
+                            detailSelectedActionBtn = (detailSelectedActionBtn + 5) % 6;
+                        }
+                        if (pressed & SCE_CTRL_RIGHT) {
+                            detailSelectedActionBtn = (detailSelectedActionBtn + 1) % 6;
+                        }
+                        if (pressed & SCE_CTRL_DOWN) {
+                            if (detailActiveTab == 1 && !detailMeta.chapters.empty()) {
+                                detailSelectedChapterIdx = 0;
+                            } else {
+                                detailContentScrollY += 40.0f;
+                            }
+                        }
+                        if (pressed & SCE_CTRL_UP) {
+                            if (detailContentScrollY > 0.0f) {
+                                detailContentScrollY = std::max(0.0f, detailContentScrollY - 40.0f);
+                            }
+                        }
+
+                        if (pressed & SCE_CTRL_CROSS) {
+                            switch (detailSelectedActionBtn) {
+                                case 0: // Ler
+                                    openItem(detailItemIndex);
+                                    break;
+                                case 1: // Favoritar
+                                    FileBrowser::toggleFavorite(curItem);
+                                    for (auto& orig : allItems) {
+                                        if (orig.filename == curItem.filename) {
+                                            orig.isFavorite = curItem.isFavorite;
+                                            break;
+                                        }
+                                    }
+                                    FileBrowser::saveMetadata(allItems);
+                                    break;
+                                case 2: // Marcar como Lido
+                                    if (curItem.progressPercent >= 99.0f) {
+                                        curItem.currentPage = 0;
+                                        curItem.progressPercent = 0.0f;
+                                    } else {
+                                        int totP = (curItem.totalPages > 0) ? curItem.totalPages : (detailMeta.count > 0 ? detailMeta.count : 1);
+                                        curItem.currentPage = totP - 1;
+                                        curItem.progressPercent = 100.0f;
+                                    }
+                                    for (auto& orig : allItems) {
+                                        if (orig.filename == curItem.filename) {
+                                            orig.currentPage = curItem.currentPage;
+                                            orig.progressPercent = curItem.progressPercent;
+                                            break;
+                                        }
+                                    }
+                                    FileBrowser::saveMetadata(allItems);
+                                    break;
+                                case 3: // Limpar Histórico
+                                    curItem.currentPage = 0;
+                                    curItem.progressPercent = 0.0f;
+                                    curItem.lastReadTime = 0;
+                                    curItem.lastReadFormatted = "--/--/----";
+                                    for (auto& orig : allItems) {
+                                        if (orig.filename == curItem.filename) {
+                                            orig.currentPage = 0;
+                                            orig.progressPercent = 0.0f;
+                                            orig.lastReadTime = 0;
+                                            orig.lastReadFormatted = "--/--/----";
+                                            break;
+                                        }
+                                    }
+                                    FileBrowser::saveMetadata(allItems);
+                                    break;
+                                case 4: // Vincular
+                                    openPagesLink(detailItemIndex);
+                                    break;
+                                case 5: // Excluir
+                                    itemToDeleteIndex = detailItemIndex;
+                                    showDeleteConfirm = true;
+                                    deleteConfirmYesSelected = false;
+                                    currentState = AppState::MENU;
+                                    break;
+                            }
+                        }
+                    }
+                }
+
+                // Renderização da Tela de Detalhes
+                startDrawing();
+                vita2d_clear_screen();
+
+                vita2d_texture* coverTex = CoverManager::getInstance().getCoverTexture(curItem.fullPath);
+                UIComponents::drawDetailScreen(
+                    curItem,
+                    detailMeta,
+                    coverTex,
+                    detailActiveTab,
+                    detailSelectedActionBtn,
+                    detailSelectedChapterIdx,
+                    detailContentScrollY,
+                    detailCoverModalOpen,
+                    readerRotated
+                );
+
+                endDrawing();
+            } else {
+                currentState = AppState::MENU;
+            }
         }
 
         oldPad.buttons = logicalButtons; // save logical for edge detection
